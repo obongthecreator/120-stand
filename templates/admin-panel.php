@@ -64,6 +64,11 @@ include STAND120_PLUGIN_DIR . 'templates/partials/header.php';
     <button class="tab-btn" data-tab="orders-tab">
         <iconify-icon icon="solar:cart-large-2-linear"></iconify-icon> Orders
     </button>
+    <?php if (Stand120_Auth::is_super_admin()): ?>
+    <button class="tab-btn" data-tab="super-admin-tab">
+        <iconify-icon icon="solar:shield-check-linear"></iconify-icon> Super Admin
+    </button>
+    <?php endif; ?>
 </div>
 
 <!-- Products Tab -->
@@ -241,10 +246,18 @@ include STAND120_PLUGIN_DIR . 'templates/partials/header.php';
                 <button id="clearCache" class="btn btn-secondary">
                     <iconify-icon icon="solar:refresh-linear"></iconify-icon> Clear Cache
                 </button>
+                <?php if (Stand120_Auth::is_super_admin()): ?>
                 <button id="clearAllRecords" class="btn btn-danger">
                     <iconify-icon icon="solar:trash-bin-trash-linear"></iconify-icon> Clear All Records
                 </button>
+                <?php endif; ?>
             </div>
+            <?php if (!Stand120_Auth::is_super_admin()): ?>
+            <p style="color: var(--text-muted); margin-top: 12px; font-size: 0.85rem;">
+                <iconify-icon icon="solar:info-circle-linear"></iconify-icon>
+                Only Super Admins can clear all records. Contact a Super Admin if needed.
+            </p>
+            <?php endif; ?>
         </div>
     </div>
 </div>
@@ -304,6 +317,72 @@ include STAND120_PLUGIN_DIR . 'templates/partials/header.php';
         </div>
     </div>
 </div>
+
+<?php if (Stand120_Auth::is_super_admin()): ?>
+<!-- Super Admin Tab -->
+<div id="super-admin-tab" class="tab-content">
+    <!-- System Health Section -->
+    <div class="glass-card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h3 style="color: var(--primary-color);">
+                <iconify-icon icon="solar:shield-check-linear"></iconify-icon> System Health Diagnostics
+            </h3>
+            <button id="refreshDiagnostics" class="btn btn-primary btn-sm">
+                <iconify-icon icon="solar:refresh-linear"></iconify-icon> Refresh
+            </button>
+        </div>
+
+        <p style="color: var(--text-muted); margin-bottom: 20px;">
+            <iconify-icon icon="solar:info-circle-linear"></iconify-icon>
+            Overview of all forms and features. Shows what is working, what needs attention, and how to fix issues.
+        </p>
+
+        <!-- Summary Cards -->
+        <div id="diagnosticsSummary" class="diagnostics-summary">
+            <div class="diagnostics-summary-card diagnostics-good">
+                <iconify-icon icon="solar:check-circle-linear" style="font-size: 1.5rem;"></iconify-icon>
+                <span class="diagnostics-summary-count" id="diagGoodCount">-</span>
+                <span class="diagnostics-summary-label">Working</span>
+            </div>
+            <div class="diagnostics-summary-card diagnostics-warning">
+                <iconify-icon icon="solar:danger-triangle-linear" style="font-size: 1.5rem;"></iconify-icon>
+                <span class="diagnostics-summary-count" id="diagWarningCount">-</span>
+                <span class="diagnostics-summary-label">Warnings</span>
+            </div>
+            <div class="diagnostics-summary-card diagnostics-error">
+                <iconify-icon icon="solar:close-circle-linear" style="font-size: 1.5rem;"></iconify-icon>
+                <span class="diagnostics-summary-count" id="diagErrorCount">-</span>
+                <span class="diagnostics-summary-label">Errors</span>
+            </div>
+        </div>
+
+        <!-- Diagnostics List -->
+        <div id="diagnosticsList" class="diagnostics-list">
+            <div style="text-align: center; padding: 40px; color: var(--text-muted);">
+                <iconify-icon icon="solar:refresh-linear" style="font-size: 2rem;"></iconify-icon>
+                <p style="margin-top: 8px;">Loading diagnostics...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Danger Zone Section -->
+    <div class="glass-card" style="margin-top: 20px; border: 1px solid var(--danger-color);">
+        <h3 style="margin-bottom: 16px; color: var(--danger-color);">
+            <iconify-icon icon="solar:danger-triangle-linear"></iconify-icon> Danger Zone
+        </h3>
+        <p style="color: var(--text-muted); margin-bottom: 20px;">
+            <iconify-icon icon="solar:info-circle-linear"></iconify-icon>
+            These actions are irreversible. Only use them when absolutely necessary.
+        </p>
+        <button id="superAdminClearAll" class="btn btn-danger">
+            <iconify-icon icon="solar:trash-bin-trash-linear"></iconify-icon> Delete All Records Across Site
+        </button>
+        <p style="color: var(--text-muted); margin-top: 12px; font-size: 0.85rem;">
+            This will permanently delete all orders, inventory records, financial summaries, expenses, activity logs, and sync queue data. Products and staff will not be affected.
+        </p>
+    </div>
+</div>
+<?php endif; ?>
 
 <script>
     $(document).ready(function() {

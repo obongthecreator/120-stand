@@ -1508,6 +1508,9 @@ const AdminPanel = {
         this.bindEvents();
         this.loadData();
         this.loadOpeningValues();
+        if (Stand120.config.is_super_admin) {
+            this.loadDiagnostics();
+        }
     },
     
     bindEvents: function() {
@@ -1526,6 +1529,8 @@ const AdminPanel = {
         $(document).on('click', '.delete-order', this.deleteOrder.bind(this));
         $(document).on('click', '#prevOrderPage', () => { this.orderPage--; this.loadOrders(); });
         $(document).on('click', '#nextOrderPage', () => { this.orderPage++; this.loadOrders(); });
+        $(document).on('click', '#refreshDiagnostics', this.loadDiagnostics.bind(this));
+        $(document).on('click', '#superAdminClearAll', this.clearAllRecords.bind(this));
     },
     
     loadData: function() {
@@ -2028,6 +2033,66 @@ const AdminPanel = {
         }).catch(() => {
             Stand120.hideLoading();
             Stand120.showAlert('danger', 'Failed to delete order');
+        });
+    },
+    
+    loadDiagnostics: function() {
+        const $list = $('#diagnosticsList');
+        $list.html('<div style="text-align: center; padding: 40px; color: var(--text-muted);"><iconify-icon icon="solar:refresh-linear" style="font-size: 2rem;"></iconify-icon><p style="margin-top: 8px;">Loading diagnostics...</p></div>');
+        
+        Stand120.ajax('get_system_diagnostics').then(response => {
+            if (response.success) {
+                this.renderDiagnostics(response.data);
+            } else {
+                $list.html('<div style="text-align: center; padding: 40px; color: var(--danger-color);"><iconify-icon icon="solar:close-circle-linear" style="font-size: 2rem;"></iconify-icon><p style="margin-top: 8px;">' + (response.data?.message || 'Failed to load diagnostics') + '</p></div>');
+            }
+        }).catch(() => {
+            $list.html('<div style="text-align: center; padding: 40px; color: var(--danger-color);"><iconify-icon icon="solar:close-circle-linear" style="font-size: 2rem;"></iconify-icon><p style="margin-top: 8px;">Failed to load diagnostics</p></div>');
+        });
+    },
+    
+    renderDiagnostics: function(data) {
+        const summary = data.summary || {};
+        const diagnostics = data.diagnostics || [];
+        
+        $('#diagGoodCount').text(summary.good || 0);
+        $('#diagWarningCount').text(summary.warnings || 0);
+        $('#diagErrorCount').text(summary.errors || 0);
+        
+        const $list = $('#diagnosticsList');
+        $list.empty();
+        
+        if (diagnostics.length === 0) {
+            $list.html('<div style="text-align: center; padding: 40px; color: var(--text-muted);">No diagnostics data available.</div>');
+            return;
+        }
+        
+        diagnostics.forEach(item => {
+            const statusClass = 'diagnostics-status-' + item.status;
+            const statusIcon = item.status === 'good' ? 'solar:check-circle-bold' : (item.status === 'warning' ? 'solar:danger-triangle-bold' : 'solar:close-circle-bold');
+            const statusLabel = item.status === 'good' ? 'Working' : (item.status === 'warning' ? 'Warning' : 'Error');
+            
+            let fixHtml = '';
+            if (item.fix) {
+                fixHtml = '<div class="diagnostics-fix"><iconify-icon icon="solar:lightbulb-linear"></iconify-icon> <strong>Fix:</strong> ' + $('<span>').text(item.fix).html() + '</div>';
+            }
+            
+            const card = $('<div>').addClass('diagnostics-card ' + statusClass).html(
+                '<div class="diagnostics-card-header">' +
+                    '<div class="diagnostics-card-title">' +
+                        '<iconify-icon icon="' + statusIcon + '" class="diagnostics-status-icon"></iconify-icon>' +
+                        '<span>' + $('<span>').text(item.feature).html() + '</span>' +
+                    '</div>' +
+                    '<span class="diagnostics-badge ' + statusClass + '">' + statusLabel + '</span>' +
+                '</div>' +
+                '<div class="diagnostics-card-body">' +
+                    '<p class="diagnostics-detail"><iconify-icon icon="solar:document-text-linear"></iconify-icon> ' + $('<span>').text(item.detail).html() + '</p>' +
+                    '<p class="diagnostics-page"><iconify-icon icon="solar:link-linear"></iconify-icon> Page: ' + $('<span>').text(item.page).html() + '</p>' +
+                    fixHtml +
+                '</div>'
+            );
+            
+            $list.append(card);
         });
     },
     
