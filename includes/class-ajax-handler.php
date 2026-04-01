@@ -175,6 +175,9 @@ class Stand120_Ajax_Handler {
             case 'clear_all_records':
                 self::clear_all_records();
                 break;
+            case 'get_system_diagnostics':
+                self::get_system_diagnostics();
+                break;
             
             // Expense actions
             case 'submit_expenses':
@@ -1682,8 +1685,8 @@ class Stand120_Ajax_Handler {
     }
     
     private static function clear_all_records() {
-        if (!Stand120_Auth::is_admin()) {
-            wp_send_json_error(array('message' => 'Unauthorized - Admin access required'));
+        if (!Stand120_Auth::is_super_admin()) {
+            wp_send_json_error(array('message' => 'Unauthorized - Super Admin access required'));
             return;
         }
         
@@ -1728,5 +1731,23 @@ class Stand120_Ajax_Handler {
         
         $result = Stand120_Reconciliation::get_month_data($year, $month);
         wp_send_json_success($result);
+    }
+
+    /**
+     * Get system diagnostics (Super Admin only)
+     */
+    private static function get_system_diagnostics() {
+        if (!Stand120_Auth::is_super_admin()) {
+            wp_send_json_error(array('message' => 'Unauthorized - Super Admin access required'));
+            return;
+        }
+
+        $result = Stand120_Admin_Panel::get_system_diagnostics();
+
+        if ($result['success']) {
+            wp_send_json_success($result);
+        } else {
+            wp_send_json_error($result);
+        }
     }
 }
