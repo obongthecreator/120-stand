@@ -423,9 +423,10 @@
          * Close modal
          */
         closeModal: function() {
-            $('.modal-overlay').removeClass('active');
+            var overlays = $('.modal-overlay');
+            overlays.removeClass('active');
             setTimeout(() => {
-                $('.modal-overlay').remove();
+                overlays.remove();
             }, 300);
         },
         
