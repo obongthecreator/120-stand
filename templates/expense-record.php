@@ -143,6 +143,12 @@ include STAND120_PLUGIN_DIR . 'templates/partials/header.php';
         // Add first row by default
         addRow();
         
+        // Prevent Enter key from submitting the form (which causes page reload)
+        $('#expenseForm').on('submit', function(e) {
+            e.preventDefault();
+            return false;
+        });
+        
         $('#addExpenseRow').on('click', function() {
             addRow();
         });

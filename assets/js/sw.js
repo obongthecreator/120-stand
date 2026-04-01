@@ -27,7 +27,8 @@ self.addEventListener('install', (event) => {
             });
         })
     );
-    self.skipWaiting();
+    // Do NOT call skipWaiting() - let the new SW wait until all tabs are closed
+    // to avoid disrupting pages that are currently open
 });
 
 // Activate event
@@ -43,7 +44,8 @@ self.addEventListener('activate', (event) => {
             );
         })
     );
-    self.clients.claim();
+    // Do NOT call clients.claim() - let existing tabs continue using
+    // the old SW until they are reloaded, to avoid unexpected refreshes
 });
 
 // Fetch event
@@ -77,7 +79,8 @@ self.addEventListener('fetch', (event) => {
     }
     
     // Network-first strategy for HTML pages
-    if (request.headers.get('accept').includes('text/html')) {
+    const acceptHeader = request.headers.get('accept') || '';
+    if (acceptHeader.includes('text/html')) {
         event.respondWith(
             fetch(request)
                 .then((response) => {

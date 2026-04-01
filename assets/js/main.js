@@ -34,9 +34,21 @@
             $(window).on('scroll', this.handleScroll);
             $(document).on('click', '.scroll-to-top', this.scrollToTop);
             
-            // Online/Offline detection
-            window.addEventListener('online', () => this.handleOnline());
-            window.addEventListener('offline', () => this.handleOffline());
+            // Online/Offline detection (debounced to avoid flicker on flaky connections)
+            this._onlineDebounce = null;
+            this._offlineDebounce = null;
+            window.addEventListener('online', () => {
+                clearTimeout(this._offlineDebounce);
+                this._onlineDebounce = setTimeout(() => this.handleOnline(), 3000);
+            });
+            window.addEventListener('offline', () => {
+                clearTimeout(this._onlineDebounce);
+                this._offlineDebounce = setTimeout(() => {
+                    if (!navigator.onLine) {
+                        this.handleOffline();
+                    }
+                }, 3000);
+            });
             
             // Form auto-save
             $(document).on('input', '.auto-save-input', this.debounce(this.handleAutoSave, 500));
