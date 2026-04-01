@@ -586,6 +586,12 @@ const TakeOrder = {
         this.bindEvents();
         this.calculateTotals(); // Initial calculation
         
+        // Prevent Enter key from submitting the order form (which causes page reload)
+        $('#orderForm').on('submit', function(e) {
+            e.preventDefault();
+            return false;
+        });
+        
         // Initialize payment method click handlers directly
         $('.payment-option').on('click', function(e) {
             e.preventDefault();

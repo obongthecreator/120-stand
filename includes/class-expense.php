@@ -16,16 +16,35 @@ class Stand120_Expense {
         $user_id = get_current_user_id();
         $staff_table = $wpdb->prefix . 'stand120_staff';
         
+        // Try to find existing staff record
         $staff = $wpdb->get_row($wpdb->prepare(
-            "SELECT id FROM $staff_table WHERE user_id = %d",
+            "SELECT id, status FROM $staff_table WHERE user_id = %d",
             $user_id
         ));
         
-        if (!$staff) {
-            return array('success' => false, 'message' => 'Staff record not found.');
+        if ($staff) {
+            $staff_id = $staff->id;
+            // Ensure status is active
+            if ($staff->status !== 'active') {
+                $wpdb->update($staff_table, array('status' => 'active'), array('id' => $staff_id));
+            }
+        } else {
+            // Auto-create staff record for any logged-in user
+            $user = wp_get_current_user();
+            $is_admin = in_array('administrator', (array) $user->roles);
+            
+            $result = $wpdb->insert($staff_table, array(
+                'user_id' => $user_id,
+                'full_name' => $user->display_name ?: $user->user_login,
+                'role' => $is_admin ? 'admin' : 'staff',
+                'status' => 'active'
+            ));
+            
+            if ($result === false) {
+                return array('success' => false, 'message' => 'Could not create staff record. Please contact an administrator.');
+            }
+            $staff_id = $wpdb->insert_id;
         }
-        
-        $staff_id = $staff->id;
         
         // Parse expenses
         $expenses = array();
