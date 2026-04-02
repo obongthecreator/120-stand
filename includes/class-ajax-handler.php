@@ -732,10 +732,23 @@ class Stand120_Ajax_Handler {
         }
         
         $results = array();
+        $synced_ids = get_option('stand120_synced_local_ids', array());
+        $new_synced = false;
         
         foreach ($data as $item) {
             $type = $item['type'] ?? '';
             $record = $item['data'] ?? array();
+            $local_id = $item['local_id'] ?? '';
+            
+            // Deduplication: skip items that were already synced (prevents duplicate orders on retry)
+            if ($local_id && in_array($local_id, $synced_ids)) {
+                $results[] = array(
+                    'type' => $type,
+                    'local_id' => $local_id,
+                    'result' => array('success' => true, 'message' => 'Already synced (duplicate skipped)')
+                );
+                continue;
+            }
             
             switch ($type) {
                 case 'order':
@@ -760,11 +773,25 @@ class Stand120_Ajax_Handler {
                     $result = array('success' => false, 'message' => 'Unknown type');
             }
             
+            // Track successfully synced local_ids to prevent future duplicates
+            if ($local_id && !empty($result['success'])) {
+                $synced_ids[] = $local_id;
+                $new_synced = true;
+            }
+            
             $results[] = array(
                 'type' => $type,
-                'local_id' => $item['local_id'] ?? '',
+                'local_id' => $local_id,
                 'result' => $result
             );
+        }
+        
+        // Persist synced IDs (keep only last 200 to prevent unbounded growth)
+        if ($new_synced) {
+            if (count($synced_ids) > 200) {
+                $synced_ids = array_slice($synced_ids, -200);
+            }
+            update_option('stand120_synced_local_ids', $synced_ids);
         }
         
         wp_send_json_success(array(

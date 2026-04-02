@@ -37,12 +37,15 @@
             // Online/Offline detection (debounced to avoid flicker on flaky connections)
             this._onlineDebounce = null;
             this._offlineDebounce = null;
+            this._isSyncing = false;
             window.addEventListener('online', () => {
                 clearTimeout(this._offlineDebounce);
+                clearTimeout(this._onlineDebounce);
                 this._onlineDebounce = setTimeout(() => this.handleOnline(), 3000);
             });
             window.addEventListener('offline', () => {
                 clearTimeout(this._onlineDebounce);
+                clearTimeout(this._offlineDebounce);
                 this._offlineDebounce = setTimeout(() => {
                     if (!navigator.onLine) {
                         this.handleOffline();
@@ -260,19 +263,31 @@
          * Sync offline data
          */
         syncOfflineData: function() {
+            // Prevent concurrent sync attempts (race condition guard)
+            if (this._isSyncing) return;
+            
             const offlineQueue = JSON.parse(localStorage.getItem('stand120_offline_queue') || '[]');
             
             if (offlineQueue.length === 0) return;
             
+            this._isSyncing = true;
+            
+            // Clear queue BEFORE sending to prevent duplicate submissions
+            // if another sync fires before this one completes
+            localStorage.setItem('stand120_offline_queue', '[]');
+            
             this.ajax('sync_offline_data', {
                 offline_data: JSON.stringify(offlineQueue)
             }).then(response => {
+                this._isSyncing = false;
                 if (response.success) {
-                    localStorage.setItem('stand120_offline_queue', '[]');
                     this.showAlert('success', 'Offline data synced successfully!');
                 }
             }).catch(() => {
-                // Keep data for next sync attempt
+                this._isSyncing = false;
+                // On network failure, re-queue items (merge with any new items added since)
+                const currentQueue = JSON.parse(localStorage.getItem('stand120_offline_queue') || '[]');
+                localStorage.setItem('stand120_offline_queue', JSON.stringify([...offlineQueue, ...currentQueue]));
             });
         },
         
