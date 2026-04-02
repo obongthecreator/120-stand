@@ -784,7 +784,7 @@ const TakeOrder = {
         };
     },
     
-    handleSubmit: async function(e) {
+    handleSubmit: function(e) {
         e.preventDefault();
         
         if (this.isSubmitting) {
@@ -807,36 +807,25 @@ const TakeOrder = {
             return;
         }
         
+        // Require cash amount when "both" is selected
+        if (paymentMethod === 'both') {
+            const cashAmt = Stand120.parseNumber($('#cashAmount').val()) || 0;
+            if (cashAmt <= 0) {
+                Stand120.showAlert('danger', 'Please enter the cash amount when using both payment methods.');
+                $('#cashAmount').focus();
+                return;
+            }
+        }
+        
         // Check if confirmation is needed (for transfer or both)
         if ((paymentMethod === 'transfer' || paymentMethod === 'both') && !data.payment_confirmed) {
             Stand120.showAlert('warning', 'Please confirm payment has been received before submitting.');
             return;
         }
         
-        // Show confirmation modal
-        const grandTotal = Stand120.parseNumber($('#grandTotal').text().replace('₦', ''));
-        let paymentDisplay = paymentMethod === 'both' ? 'Transfer/Card + Cash' : 
-                            (paymentMethod === 'transfer' ? 'Transfer/Card' : 'Cash');
-        
-        const confirmContent = `
-            <div class="order-summary">
-                <p><strong>Total Items:</strong> ${items.length}</p>
-                <p><strong>Payment Method:</strong> ${paymentDisplay}</p>
-                <p><strong>Grand Total:</strong> <span class="naira">₦</span>${Stand120.formatNumber(grandTotal)}</p>
-            </div>
-            <p class="mt-3">Are you sure you want to submit this order?</p>
-        `;
-        
-        const confirmed = await Stand120.showModal({
-            title: 'Confirm Order Submission',
-            content: confirmContent,
-            confirmText: 'Submit Order'
-        });
-        
-        if (!confirmed) return;
-        
+        // Submit immediately — no confirmation modal delay
         this.isSubmitting = true;
-        $('#submitOrder').prop('disabled', true).html('<span class="loading-spinner"></span> Submitting...');
+        $('#submitOrder').prop('disabled', true).html('<iconify-icon icon="solar:check-circle-linear"></iconify-icon> Submitting...');
         
         // Check if offline
         if (!navigator.onLine) {
@@ -849,22 +838,20 @@ const TakeOrder = {
             return;
         }
         
-        // Log the data being sent for debugging
+        // Reset form immediately for speed — don't wait for server response
+        this.resetForm();
+        this.isSubmitting = false;
+        $('#submitOrder').prop('disabled', false).html('<iconify-icon icon="solar:check-circle-linear"></iconify-icon> Submit Order');
         
+        // Fire AJAX in background — swift, non-blocking
         Stand120.ajax('submit_order', data).then(response => {
             if (response.success) {
-                // Show success popup (no page refresh)
-                Stand120.showAlert('success', 'Order #' + (response.data.order_id || '') + ' submitted successfully!');
-                this.resetForm();
+                Stand120.showAlert('success', 'Order #' + (response.data.order_id || '') + ' submitted!');
             } else {
-                Stand120.showAlert('danger', response.data?.message || 'Failed to submit order.');
+                console.warn('Order submission warning:', response.data?.message);
             }
         }).catch(error => {
-            console.error('Order submission error:', error);
-            Stand120.showAlert('danger', 'An error occurred. Please try again.');
-        }).finally(() => {
-            this.isSubmitting = false;
-            $('#submitOrder').prop('disabled', false).html('<iconify-icon icon="solar:check-circle-linear"></iconify-icon> Submit Order');
+            console.warn('Order submission error:', error);
         });
     },
     
