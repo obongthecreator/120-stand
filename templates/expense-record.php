@@ -132,7 +132,7 @@ include STAND120_PLUGIN_DIR . 'templates/partials/header.php';
             let grandTotal = 0;
             $('#expenseBody tr').each(function() {
                 const amount = Stand120.parseNumber($(this).find('.expense-amount').val());
-                const qty = parseInt($(this).find('.expense-qty').val().toString().replace(/,/g, '')) || 0;
+                const qty = parseFloat($(this).find('.expense-qty').val().toString().replace(/,/g, '')) || 0;
                 const total = amount * qty;
                 grandTotal += total;
                 $(this).find('.row-total').html('<span class="naira">₦</span>' + Stand120.formatNumber(total));
@@ -192,7 +192,7 @@ include STAND120_PLUGIN_DIR . 'templates/partials/header.php';
             $('#expenseBody tr').each(function() {
                 const desc = $(this).find('.expense-desc').val().trim();
                 const amount = Stand120.parseNumber($(this).find('.expense-amount').val());
-                const qty = parseInt($(this).find('.expense-qty').val().toString().replace(/,/g, '')) || 0;
+                const qty = parseFloat($(this).find('.expense-qty').val().toString().replace(/,/g, '')) || 0;
                 
                 if (desc === '' && amount === 0) {
                     return; // skip empty rows

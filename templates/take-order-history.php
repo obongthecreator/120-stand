@@ -55,6 +55,8 @@ include STAND120_PLUGIN_DIR . 'templates/partials/header.php';
                     <th>Staff</th>
                     <th>Items</th>
                     <th>Payment</th>
+                    <th>Cash</th>
+                    <th>Transfer</th>
                     <th>Total</th>
                     <?php if ($is_admin): ?>
                     <th>Action</th>
@@ -150,16 +152,27 @@ include STAND120_PLUGIN_DIR . 'templates/partials/header.php';
     function renderOrders(orders) {
         const $tbody = $('#historyBody');
         $tbody.empty();
-        const colSpan = isAdmin ? 8 : 7;
+        const colSpan = isAdmin ? 10 : 9;
         
         if (orders.length === 0) {
             $tbody.append(`<tr><td colspan="${colSpan}" style="text-align: center; color: var(--text-muted);">No orders found</td></tr>`);
             return;
         }
         
+        let totalCash = 0;
+        let totalTransfer = 0;
+        let totalGrand = 0;
+        
         orders.forEach(order => {
             const items = order.items ? order.items.map(i => i.product_name + ' x' + i.quantity).join(', ') : '-';
             const canDelete = isSuperAdmin || (isAdmin && order.order_date === todayStr);
+            const cashAmt = parseFloat(order.cash_amount) || 0;
+            const transferAmt = parseFloat(order.transfer_amount) || 0;
+            const grandAmt = parseFloat(order.grand_total) || 0;
+            
+            totalCash += cashAmt;
+            totalTransfer += transferAmt;
+            totalGrand += grandAmt;
             
             let actionCol = '';
             if (isAdmin) {
@@ -178,12 +191,26 @@ include STAND120_PLUGIN_DIR . 'templates/partials/header.php';
                     <td>${order.staff_name || '-'}</td>
                     <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;" title="${items}">${items}</td>
                     <td>${order.payment_method}</td>
-                    <td class="formatted-number"><span class="naira">₦</span>${Stand120.formatNumber(order.grand_total)}</td>
+                    <td class="formatted-number"><span class="naira">₦</span>${Stand120.formatNumber(cashAmt)}</td>
+                    <td class="formatted-number"><span class="naira">₦</span>${Stand120.formatNumber(transferAmt)}</td>
+                    <td class="formatted-number"><span class="naira">₦</span>${Stand120.formatNumber(grandAmt)}</td>
                     ${actionCol}
                 </tr>
             `;
             $tbody.append(row);
         });
+        
+        // Summary totals row
+        const summaryRow = `
+            <tr style="font-weight: bold; background: rgba(139, 0, 0, 0.05); border-top: 2px solid var(--primary-color);">
+                <td colspan="6" style="text-align: right;">Page Totals:</td>
+                <td class="formatted-number"><span class="naira">₦</span>${Stand120.formatNumber(totalCash)}</td>
+                <td class="formatted-number"><span class="naira">₦</span>${Stand120.formatNumber(totalTransfer)}</td>
+                <td class="formatted-number"><span class="naira">₦</span>${Stand120.formatNumber(totalGrand)}</td>
+                ${isAdmin ? '<td></td>' : ''}
+            </tr>
+        `;
+        $tbody.append(summaryRow);
     }
     
     function updatePagination(data) {

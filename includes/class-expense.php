@@ -71,7 +71,7 @@ class Stand120_Expense {
         foreach ($expenses as $expense) {
             $description = sanitize_text_field($expense['description'] ?? '');
             $amount = floatval($expense['amount'] ?? 0);
-            $quantity = intval($expense['quantity'] ?? 1);
+            $quantity = floatval($expense['quantity'] ?? 1);
             $total = floatval($expense['total'] ?? ($amount * $quantity));
             
             if (empty($description) || $amount <= 0) {
@@ -85,7 +85,7 @@ class Stand120_Expense {
                 'amount' => $amount,
                 'quantity' => $quantity,
                 'total' => $total
-            ), array('%d', '%s', '%s', '%f', '%d', '%f'));
+            ), array('%d', '%s', '%s', '%f', '%f', '%f'));
             
             if ($result !== false) {
                 $total_amount += $total;

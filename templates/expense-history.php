@@ -174,7 +174,7 @@ include STAND120_PLUGIN_DIR . 'templates/partials/header.php';
         
         records.forEach(expense => {
             const amount = parseFloat(expense.amount) || 0;
-            const qty = parseInt(expense.quantity) || 1;
+            const qty = parseFloat(expense.quantity) || 1;
             const total = amount * qty;
             const canDelete = isSuperAdmin || (isAdmin && expense.expense_date === todayStr);
             
@@ -187,12 +187,15 @@ include STAND120_PLUGIN_DIR . 'templates/partials/header.php';
                 }
             }
             
+            // Format qty: show decimals only if not a whole number
+            const qtyDisplay = qty % 1 === 0 ? qty.toString() : qty.toFixed(2);
+            
             $tbody.append(`<tr>
                 <td>${expense.expense_date}</td>
                 <td>${expense.staff_name || '-'}</td>
                 <td>${expense.description}</td>
                 <td class="formatted-number"><span class="naira">₦</span>${Stand120.formatNumber(amount)}</td>
-                <td class="formatted-number">${qty}</td>
+                <td class="formatted-number">${qtyDisplay}</td>
                 <td class="formatted-number"><span class="naira">₦</span>${Stand120.formatNumber(total)}</td>
                 ${actionCol}
             </tr>`);
@@ -203,7 +206,7 @@ include STAND120_PLUGIN_DIR . 'templates/partials/header.php';
         let totalAmount = 0;
         records.forEach(expense => {
             const amount = parseFloat(expense.amount) || 0;
-            const qty = parseInt(expense.quantity) || 1;
+            const qty = parseFloat(expense.quantity) || 1;
             totalAmount += amount * qty;
         });
         $('#totalExpenses').html('<span class="naira">₦</span>' + Stand120.formatNumber(totalAmount));

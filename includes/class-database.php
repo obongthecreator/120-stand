@@ -226,7 +226,7 @@ class Stand120_Database {
             expense_date date NOT NULL,
             description varchar(255) NOT NULL,
             amount decimal(10,2) NOT NULL DEFAULT 0,
-            quantity int NOT NULL DEFAULT 1,
+            quantity decimal(10,2) NOT NULL DEFAULT 1,
             total decimal(10,2) NOT NULL DEFAULT 0,
             created_at datetime DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
