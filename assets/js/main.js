@@ -50,6 +50,13 @@
                 }, 3000);
             });
             
+            // GLOBAL: Prevent ALL native form submissions (blocks Enter key page reloads)
+            // Every form in the app uses AJAX via button click handlers, never native submission
+            $(document).on('submit', 'form', function(e) {
+                e.preventDefault();
+                return false;
+            });
+            
             // Form auto-save
             $(document).on('input', '.auto-save-input', this.debounce(this.handleAutoSave, 500));
             
@@ -310,7 +317,7 @@
         /**
          * Show alert as popup (centered modal)
          */
-        showAlert: function(type, message, autoRefresh = false) {
+        showAlert: function(type, message) {
             // Create popup overlay
             const popupHtml = `
                 <div class="alert-popup-overlay" style="
@@ -371,26 +378,22 @@
             // Add popup to body
             $('body').append(popupHtml);
             
-            // Handle close
+            // Handle close - never refresh the page
             $('.alert-popup-close, .alert-popup-overlay').on('click', function(e) {
                 if (e.target === this || $(this).hasClass('alert-popup-close')) {
                     $('.alert-popup-overlay').fadeOut(200, function() {
                         $(this).remove();
-                        if (autoRefresh) {
-                            window.location.reload();
-                        }
                     });
                 }
             });
             
-            // Auto-close after 3 seconds for success, then refresh if needed
-            if (type === 'success' && autoRefresh) {
+            // Auto-close success popups after 3 seconds (no page refresh)
+            if (type === 'success') {
                 setTimeout(() => {
                     $('.alert-popup-overlay').fadeOut(200, function() {
                         $(this).remove();
-                        window.location.reload();
                     });
-                }, 2000);
+                }, 3000);
             }
         },
         
@@ -850,8 +853,8 @@ const TakeOrder = {
         
         Stand120.ajax('submit_order', data).then(response => {
             if (response.success) {
-                // Show success popup and auto-refresh page
-                Stand120.showAlert('success', 'Order #' + (response.data.order_id || '') + ' submitted successfully!', true);
+                // Show success popup (no page refresh)
+                Stand120.showAlert('success', 'Order #' + (response.data.order_id || '') + ' submitted successfully!');
                 this.resetForm();
             } else {
                 Stand120.showAlert('danger', response.data?.message || 'Failed to submit order.');
