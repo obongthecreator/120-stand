@@ -1,0 +1,2261 @@
+/**
+ * 120 Stand Inventory Management - Main JavaScript
+ */
+
+(function($) {
+    'use strict';
+
+    // Global App Object
+    window.Stand120 = {
+        config: {},
+        data: {},
+        cache: {},
+        
+        /**
+         * Initialize the application
+         */
+        init: function() {
+            this.config = window.stand120_ajax || {};
+            this.bindEvents();
+            this.initComponents();
+            this.startClock();
+            this.checkOnlineStatus();
+        },
+        
+        /**
+         * Bind global events
+         */
+        bindEvents: function() {
+            // Hamburger menu
+            $(document).on('click', '.hamburger-menu', this.toggleMobileSidebar);
+            $(document).on('click', '.mobile-sidebar-overlay', this.closeMobileSidebar);
+            
+            // Scroll to top
+            $(window).on('scroll', this.handleScroll);
+            $(document).on('click', '.scroll-to-top', this.scrollToTop);
+            
+            // Online/Offline detection (debounced to avoid flicker on flaky connections)
+            this._onlineDebounce = null;
+            this._offlineDebounce = null;
+            this._isSyncing = false;
+            window.addEventListener('online', () => {
+                clearTimeout(this._offlineDebounce);
+                clearTimeout(this._onlineDebounce);
+                this._onlineDebounce = setTimeout(() => this.handleOnline(), 3000);
+            });
+            window.addEventListener('offline', () => {
+                clearTimeout(this._onlineDebounce);
+                clearTimeout(this._offlineDebounce);
+                this._offlineDebounce = setTimeout(() => {
+                    if (!navigator.onLine) {
+                        this.handleOffline();
+                    }
+                }, 3000);
+            });
+            
+            // GLOBAL: Prevent ALL native form submissions (blocks Enter key page reloads)
+            // Every form in the app uses AJAX via button click handlers, never native submission
+            $(document).on('submit', 'form', function(e) {
+                e.preventDefault();
+                return false;
+            });
+            
+            // Form auto-save
+            $(document).on('input', '.auto-save-input', this.debounce(this.handleAutoSave, 500));
+            
+            // Number formatting
+            $(document).on('input', '.number-input', this.formatNumberInput);
+            $(document).on('focus', '.number-input', this.clearNumberFormat);
+            $(document).on('blur', '.number-input', this.applyNumberFormat);
+            
+            // Smart input behavior - clear 0 on focus for quantity and number inputs
+            $(document).on('focus', '.qty-input, .table-input[type="number"], .number-input', function() {
+                const val = $(this).val().toString().replace(/,/g, '');
+                if (val === '0') {
+                    $(this).val('');
+                }
+            });
+            
+            // Restore 0 on blur if empty for quantity and number inputs
+            $(document).on('blur', '.qty-input, .table-input[type="number"], .number-input', function() {
+                const val = $(this).val().toString().replace(/,/g, '').trim();
+                if (val === '') {
+                    $(this).val('0');
+                }
+            });
+            
+            // Modal events
+            $(document).on('click', '.modal-close, .modal-cancel', this.closeModal);
+            $(document).on('click', '.modal-overlay', function(e) {
+                if (e.target === this) Stand120.closeModal();
+            });
+            
+            // Tabs
+            $(document).on('click', '.tab-btn', this.handleTabClick);
+        },
+        
+        /**
+         * Initialize components
+         */
+        initComponents: function() {
+            this.initScrollToTop();
+            this.initTooltips();
+            this.loadCachedData();
+        },
+        
+        /**
+         * Start real-time clock
+         */
+        startClock: function() {
+            const updateClock = () => {
+                const now = new Date();
+                const timeStr = now.toLocaleTimeString('en-US', { 
+                    hour: '2-digit', 
+                    minute: '2-digit', 
+                    second: '2-digit',
+                    hour12: true 
+                });
+                const dateStr = now.toLocaleDateString('en-US', {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                });
+                
+                $('.digital-clock').text(timeStr);
+                $('.date-text').text(dateStr);
+            };
+            
+            updateClock();
+            setInterval(updateClock, 1000);
+        },
+        
+        /**
+         * Toggle mobile sidebar
+         */
+        toggleMobileSidebar: function() {
+            $('.hamburger-menu').toggleClass('active');
+            $('.mobile-sidebar').toggleClass('active');
+            $('.mobile-sidebar-overlay').toggleClass('active');
+            $('body').toggleClass('sidebar-open');
+        },
+        
+        /**
+         * Close mobile sidebar
+         */
+        closeMobileSidebar: function() {
+            $('.hamburger-menu').removeClass('active');
+            $('.mobile-sidebar').removeClass('active');
+            $('.mobile-sidebar-overlay').removeClass('active');
+            $('body').removeClass('sidebar-open');
+        },
+        
+        /**
+         * Handle scroll events
+         */
+        handleScroll: function() {
+            const scrollTop = $(window).scrollTop();
+            const docHeight = $(document).height() - $(window).height();
+            const scrollPercent = (scrollTop / docHeight) * 100;
+            
+            // Show/hide scroll to top button
+            if (scrollTop > 300) {
+                $('.scroll-to-top').addClass('visible');
+            } else {
+                $('.scroll-to-top').removeClass('visible');
+            }
+            
+            // Update progress ring
+            const circumference = 2 * Math.PI * 25;
+            const offset = circumference - (scrollPercent / 100) * circumference;
+            $('.scroll-progress-ring .progress').css('stroke-dashoffset', offset);
+        },
+        
+        /**
+         * Initialize scroll to top button
+         */
+        initScrollToTop: function() {
+            const circumference = 2 * Math.PI * 25;
+            $('.scroll-progress-ring .progress').css({
+                'stroke-dasharray': circumference,
+                'stroke-dashoffset': circumference
+            });
+        },
+        
+        /**
+         * Scroll to top
+         */
+        scrollToTop: function() {
+            $('html, body').animate({ scrollTop: 0 }, 500);
+        },
+        
+        /**
+         * Check online status
+         */
+        checkOnlineStatus: function() {
+            if (!navigator.onLine) {
+                this.handleOffline();
+            }
+        },
+        
+        /**
+         * Handle online event
+         */
+        handleOnline: function() {
+            $('.offline-banner').removeClass('visible');
+            this.syncOfflineData();
+        },
+        
+        /**
+         * Handle offline event
+         */
+        handleOffline: function() {
+            $('.offline-banner').addClass('visible');
+        },
+        
+        /**
+         * Load cached data from localStorage
+         */
+        loadCachedData: function() {
+            const cached = localStorage.getItem('stand120_cache');
+            if (cached) {
+                this.cache = JSON.parse(cached);
+            }
+        },
+        
+        /**
+         * Save data to cache
+         */
+        saveToCache: function(key, data) {
+            this.cache[key] = {
+                data: data,
+                timestamp: Date.now()
+            };
+            localStorage.setItem('stand120_cache', JSON.stringify(this.cache));
+        },
+        
+        /**
+         * Get cached data
+         */
+        getFromCache: function(key, maxAge = 300000) {
+            const cached = this.cache[key];
+            if (cached && (Date.now() - cached.timestamp) < maxAge) {
+                return cached.data;
+            }
+            return null;
+        },
+        
+        /**
+         * Save data for offline sync
+         */
+        saveOfflineData: function(type, data) {
+            let offlineQueue = JSON.parse(localStorage.getItem('stand120_offline_queue') || '[]');
+            offlineQueue.push({
+                type: type,
+                data: data,
+                local_id: 'local_' + Date.now(),
+                timestamp: Date.now()
+            });
+            localStorage.setItem('stand120_offline_queue', JSON.stringify(offlineQueue));
+        },
+        
+        /**
+         * Sync offline data
+         */
+        syncOfflineData: function() {
+            // Prevent concurrent sync attempts (race condition guard)
+            if (this._isSyncing) return;
+            
+            const offlineQueue = JSON.parse(localStorage.getItem('stand120_offline_queue') || '[]');
+            
+            if (offlineQueue.length === 0) return;
+            
+            this._isSyncing = true;
+            
+            // Clear queue BEFORE sending to prevent duplicate submissions
+            // if another sync fires before this one completes
+            localStorage.setItem('stand120_offline_queue', '[]');
+            
+            this.ajax('sync_offline_data', {
+                offline_data: JSON.stringify(offlineQueue)
+            }).then(response => {
+                this._isSyncing = false;
+                if (response.success) {
+                    this.showAlert('success', 'Offline data synced successfully!');
+                }
+            }).catch(() => {
+                this._isSyncing = false;
+                // On network failure, re-queue items (merge with any new items added since)
+                const currentQueue = JSON.parse(localStorage.getItem('stand120_offline_queue') || '[]');
+                localStorage.setItem('stand120_offline_queue', JSON.stringify([...offlineQueue, ...currentQueue]));
+            });
+        },
+        
+        /**
+         * AJAX helper
+         */
+        ajax: function(action, data = {}) {
+            return new Promise((resolve, reject) => {
+                data.action = 'stand120_action';
+                data.stand120_action = action;
+                data.nonce = this.config.nonce;
+                
+                $.ajax({
+                    url: this.config.ajax_url,
+                    type: 'POST',
+                    data: data,
+                    success: function(response) {
+                        resolve(response);
+                    },
+                    error: function(xhr, status, error) {
+                        reject(error);
+                    }
+                });
+            });
+        },
+        
+        /**
+         * Show loading overlay
+         */
+        showLoading: function(message = 'Loading...') {
+            $('.loading-overlay').addClass('active');
+            $('.loading-overlay .loading-text').text(message);
+        },
+        
+        /**
+         * Hide loading overlay
+         */
+        hideLoading: function() {
+            $('.loading-overlay').removeClass('active');
+        },
+        
+        /**
+         * Show alert as popup (centered modal)
+         */
+        showAlert: function(type, message) {
+            // Create popup overlay
+            const popupHtml = `
+                <div class="alert-popup-overlay" style="
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    background: rgba(0,0,0,0.5);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    z-index: 10000;
+                ">
+                    <div class="alert-popup" style="
+                        background: white;
+                        padding: 30px 40px;
+                        border-radius: 16px;
+                        text-align: center;
+                        max-width: 400px;
+                        box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+                        animation: popupSlide 0.3s ease;
+                    ">
+                        <div style="
+                            width: 60px;
+                            height: 60px;
+                            border-radius: 50%;
+                            background: ${type === 'success' ? '#10b981' : type === 'danger' ? '#ef4444' : type === 'warning' ? '#f59e0b' : '#3b82f6'};
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            margin: 0 auto 16px;
+                        ">
+                            <iconify-icon icon="solar:${type === 'success' ? 'check-read-linear' : type === 'danger' ? 'close-circle-linear' : type === 'warning' ? 'danger-triangle-linear' : 'info-circle-linear'}" style="color: white; font-size: 28px;"></iconify-icon>
+                        </div>
+                        <h3 style="margin: 0 0 12px; color: #1a1a1a; font-size: 1.3rem;">${type === 'success' ? 'Success!' : type === 'danger' ? 'Error!' : type === 'warning' ? 'Warning!' : 'Info'}</h3>
+                        <p style="margin: 0 0 20px; color: #666; font-size: 1rem;">${message}</p>
+                        <button class="alert-popup-close btn btn-primary" style="min-width: 120px;">OK</button>
+                    </div>
+                </div>
+            `;
+            
+            // Add animation style if not exists
+            if (!$('#popup-animation-style').length) {
+                $('head').append(`
+                    <style id="popup-animation-style">
+                        @keyframes popupSlide {
+                            from { transform: scale(0.8); opacity: 0; }
+                            to { transform: scale(1); opacity: 1; }
+                        }
+                    </style>
+                `);
+            }
+            
+            // Remove existing popups
+            $('.alert-popup-overlay').remove();
+            
+            // Add popup to body
+            $('body').append(popupHtml);
+            
+            // Handle close - never refresh the page
+            $('.alert-popup-close, .alert-popup-overlay').on('click', function(e) {
+                if (e.target === this || $(this).hasClass('alert-popup-close')) {
+                    $('.alert-popup-overlay').fadeOut(200, function() {
+                        $(this).remove();
+                    });
+                }
+            });
+            
+            // Auto-close success popups after 3 seconds (no page refresh)
+            if (type === 'success') {
+                setTimeout(() => {
+                    $('.alert-popup-overlay').fadeOut(200, function() {
+                        $(this).remove();
+                    });
+                }, 3000);
+            }
+        },
+        
+        /**
+         * Show modal
+         */
+        showModal: function(options) {
+            const modal = $(`
+                <div class="modal-overlay active">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h3 class="modal-title">${options.title || 'Confirm'}</h3>
+                            <button class="modal-close"><iconify-icon icon="solar:close-circle-linear"></iconify-icon></button>
+                        </div>
+                        <div class="modal-body">
+                            ${options.content || ''}
+                        </div>
+                        <div class="modal-footer">
+                            ${options.showCancel !== false ? '<button class="btn btn-secondary modal-cancel">Cancel</button>' : ''}
+                            <button class="btn btn-primary modal-confirm">${options.confirmText || 'Confirm'}</button>
+                        </div>
+                    </div>
+                </div>
+            `);
+            
+            $('body').append(modal);
+            
+            return new Promise((resolve, reject) => {
+                modal.find('.modal-confirm').on('click', function() {
+                    Stand120.closeModal();
+                    resolve(true);
+                });
+                
+                modal.find('.modal-cancel, .modal-close').on('click', function() {
+                    Stand120.closeModal();
+                    resolve(false);
+                });
+            });
+        },
+        
+        /**
+         * Close modal
+         */
+        closeModal: function() {
+            var overlays = $('.modal-overlay');
+            overlays.removeClass('active');
+            setTimeout(() => {
+                overlays.remove();
+            }, 300);
+        },
+        
+        /**
+         * Format number with commas
+         */
+        formatNumber: function(num) {
+            if (!num && num !== 0) return '';
+            return parseFloat(num).toLocaleString('en-NG', {
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 2
+            });
+        },
+        
+        /**
+         * Parse formatted number
+         */
+        parseNumber: function(str) {
+            if (!str) return 0;
+            return parseFloat(str.toString().replace(/,/g, '')) || 0;
+        },
+        
+        /**
+         * Format number input on blur
+         */
+        formatNumberInput: function() {
+            const $input = $(this);
+            const value = $input.val().replace(/,/g, '');
+            if (value && !isNaN(value)) {
+                $input.val(Stand120.formatNumber(value));
+            }
+        },
+        
+        /**
+         * Clear number format on focus
+         */
+        clearNumberFormat: function() {
+            const $input = $(this);
+            const value = $input.val().replace(/,/g, '');
+            $input.val(value);
+        },
+        
+        /**
+         * Apply number format
+         */
+        applyNumberFormat: function() {
+            const $input = $(this);
+            const value = $input.val().replace(/,/g, '');
+            if (value && !isNaN(value)) {
+                $input.val(Stand120.formatNumber(value));
+            }
+        },
+        
+        /**
+         * Handle auto-save
+         */
+        handleAutoSave: function() {
+            const $input = $(this);
+            const saveAction = $input.data('save-action');
+            const saveData = {};
+            
+            // Collect all data from the row/form
+            $input.closest('tr, .form-group').find('[data-field]').each(function() {
+                saveData[$(this).data('field')] = $(this).val();
+            });
+            
+            if (saveAction && Object.keys(saveData).length > 0) {
+                Stand120.ajax(saveAction, saveData).then(response => {
+                    if (response.success) {
+                        $input.addClass('saved');
+                        setTimeout(() => $input.removeClass('saved'), 1000);
+                    }
+                });
+            }
+        },
+        
+        /**
+         * Handle tab click
+         */
+        handleTabClick: function() {
+            const $btn = $(this);
+            const tabId = $btn.data('tab');
+            
+            // Update button states
+            $('.tab-btn').removeClass('active');
+            $btn.addClass('active');
+            
+            // Update content states
+            $('.tab-content').removeClass('active');
+            $(`#${tabId}`).addClass('active');
+        },
+        
+        /**
+         * Initialize tooltips
+         */
+        initTooltips: function() {
+            // Tooltips are handled via CSS
+        },
+        
+        /**
+         * Debounce function
+         */
+        debounce: function(func, wait) {
+            let timeout;
+            return function(...args) {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func.apply(this, args), wait);
+            };
+        },
+        
+        /**
+         * Calculate table totals
+         */
+        calculateTableTotals: function($table) {
+            let grandTotal = 0;
+            
+            $table.find('tbody tr').each(function() {
+                const $row = $(this);
+                const price = Stand120.parseNumber($row.find('.price-cell').text());
+                const qty = parseInt($row.find('.qty-input').val()) || 0;
+                const total = price * qty;
+                
+                $row.find('.total-cell').text(Stand120.formatNumber(total));
+                grandTotal += total;
+            });
+            
+            return grandTotal;
+        }
+    };
+
+    // Initialize immediately now that the script has loaded
+    Stand120.init();
+
+})(jQuery);
+
+/**
+ * Take Order Module
+ */
+const TakeOrder = {
+    items: [],
+    isSubmitting: false,
+    
+    init: function() {
+        const self = this;
+        this.bindEvents();
+        this.calculateTotals(); // Initial calculation
+        
+        // Prevent Enter key from submitting the order form (which causes page reload)
+        $('#orderForm').on('submit', function(e) {
+            e.preventDefault();
+            return false;
+        });
+        
+        // Initialize payment method click handlers directly
+        $('.payment-option').on('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            // Remove selected class from all options
+            $('.payment-option').removeClass('selected');
+            // Add selected class to clicked option
+            $(this).addClass('selected');
+            
+            // Check the radio button
+            const $radio = $(this).find('input[type="radio"]');
+            $radio.prop('checked', true);
+            
+            // Trigger the payment method change
+            self.handlePaymentMethodChange();
+        });
+    },
+    
+    bindEvents: function() {
+        const self = this;
+        
+        // Quantity input change - direct event binding for immediate response
+        $(document).off('input.takeorder change.takeorder keyup.takeorder', '.qty-input');
+        $(document).on('input.takeorder change.takeorder keyup.takeorder', '.qty-input', function() {
+            self.calculateTotals();
+            self.updatePaymentAmounts();
+        });
+        
+        // Delivery fee input change
+        $(document).off('input.takeorder change.takeorder keyup.takeorder', '#deliveryFee');
+        $(document).on('input.takeorder change.takeorder keyup.takeorder', '#deliveryFee', function() {
+            self.calculateTotals();
+            self.updatePaymentAmounts();
+        });
+        
+        // Cash amount change - for "both" mode, auto-deduct from transfer
+        $(document).off('input.takeorder change.takeorder keyup.takeorder', '#cashAmount');
+        $(document).on('input.takeorder change.takeorder keyup.takeorder', '#cashAmount', function() {
+            const method = $('input[name="payment_method"]:checked').val();
+            if (method === 'both') {
+                const grandTotal = self.getGrandTotal();
+                const cashVal = Stand120.parseNumber($('#cashAmount').val()) || 0;
+                const transferVal = Math.max(0, grandTotal - cashVal);
+                $('#transferAmount').val(transferVal > 0 ? Stand120.formatNumber(transferVal) : '0');
+            }
+        });
+        
+        // Submit button
+        $(document).off('click.takeorder', '#submitOrder');
+        $(document).on('click.takeorder', '#submitOrder', this.handleSubmit.bind(this));
+    },
+    
+    loadMenuItems: function() {
+        Stand120.ajax('get_menu_items').then(response => {
+            if (response.success) {
+                this.renderMenuItems(response.data.items);
+            }
+        });
+    },
+    
+    renderMenuItems: function(items) {
+        const $tbody = $('#orderTable tbody');
+        $tbody.empty();
+        
+        items.forEach(item => {
+            const row = `
+                <tr data-product-id="${item.id}">
+                    <td>${item.name}</td>
+                    <td class="price-cell formatted-number"><span class="naira">₦</span>${Stand120.formatNumber(item.price)}</td>
+                    <td>
+                        <input type="number" class="table-input qty-input" value="0" min="0" data-price="${item.price}">
+                    </td>
+                    <td class="total-cell formatted-number"><span class="naira">₦</span>0</td>
+                </tr>
+            `;
+            $tbody.append(row);
+        });
+    },
+    
+    calculateTotals: function() {
+        let subtotal = 0;
+        
+        $('#orderTable tbody tr').each(function() {
+            const $row = $(this);
+            const priceAttr = $row.find('.qty-input').data('price');
+            const price = parseFloat(priceAttr) || 0;
+            const qty = parseInt($row.find('.qty-input').val()) || 0;
+            const total = price * qty;
+            
+            // Update the total cell immediately
+            $row.find('.total-cell').html('<span class="naira">₦</span>' + Stand120.formatNumber(total));
+            subtotal += total;
+        });
+        
+        // Parse delivery fee, remove commas if present
+        const deliveryFeeVal = $('#deliveryFee').val() || '0';
+        const deliveryFee = parseFloat(deliveryFeeVal.toString().replace(/,/g, '')) || 0;
+        const grandTotal = subtotal + deliveryFee;
+        
+        // Update display immediately
+        $('#subtotal').html('<span class="naira">₦</span>' + Stand120.formatNumber(subtotal));
+        $('#grandTotal').html('<span class="naira">₦</span>' + Stand120.formatNumber(grandTotal));
+        
+    },
+    
+    getGrandTotal: function() {
+        const text = $('#grandTotal').text().replace(/[₦,]/g, '');
+        return parseFloat(text) || 0;
+    },
+    
+    updatePaymentAmounts: function() {
+        const method = $('input[name="payment_method"]:checked').val();
+        if (!method) return;
+        
+        const grandTotal = this.getGrandTotal();
+        
+        if (method === 'transfer') {
+            $('#transferAmount').val(grandTotal > 0 ? Stand120.formatNumber(grandTotal) : '0');
+        } else if (method === 'cash') {
+            $('#cashAmount').val(grandTotal > 0 ? Stand120.formatNumber(grandTotal) : '0');
+        } else if (method === 'both') {
+            const cashVal = Stand120.parseNumber($('#cashAmount').val()) || 0;
+            const transferVal = Math.max(0, grandTotal - cashVal);
+            $('#transferAmount').val(transferVal > 0 ? Stand120.formatNumber(transferVal) : '0');
+        }
+    },
+    
+    handlePaymentMethodChange: function() {
+        const method = $('input[name="payment_method"]:checked').val();
+        const grandTotal = this.getGrandTotal();
+    
+        // Hide all payment sections first
+        $('#cashSection').hide();
+        $('#transferSection').hide();
+        $('#confirmationSection').hide();
+        $('#cashAmount').prop('disabled', true).val('');
+        $('#transferAmount').prop('disabled', true).val('');
+        
+        if (method === 'both') {
+            // Both - show both sections and confirmation
+            // Transfer gets the full amount by default; cash input deducts from it
+            $('#cashSection').slideDown(200);
+            $('#transferSection').slideDown(200);
+            $('#confirmationSection').slideDown(200);
+            $('#cashAmount').prop('disabled', false).val('');
+            $('#transferAmount').prop('disabled', true).val(grandTotal > 0 ? Stand120.formatNumber(grandTotal) : '0');
+        } else if (method === 'cash') {
+            // Cash only - show cash section, auto-fill with grand total
+            $('#cashSection').slideDown(200);
+            $('#cashAmount').prop('disabled', false).val(grandTotal > 0 ? Stand120.formatNumber(grandTotal) : '0');
+        } else if (method === 'transfer') {
+            // Transfer/Card - show transfer section with auto-filled amount + confirmation
+            $('#transferSection').slideDown(200);
+            $('#confirmationSection').slideDown(200);
+            $('#transferAmount').prop('disabled', true).val(grandTotal > 0 ? Stand120.formatNumber(grandTotal) : '0');
+        }
+    },
+    
+    collectOrderData: function() {
+        const items = [];
+        
+        $('#orderTable tbody tr').each(function() {
+            const $row = $(this);
+            const qty = parseInt($row.find('.qty-input').val()) || 0;
+            
+            if (qty > 0) {
+                items.push({
+                    product_id: $row.data('product-id'),
+                    product_name: $row.find('td:first').text(),
+                    price: parseFloat($row.find('.qty-input').data('price')),
+                    quantity: qty,
+                    total: parseFloat($row.find('.qty-input').data('price')) * qty
+                });
+            }
+        });
+        
+        const paymentMethod = $('input[name="payment_method"]:checked').val();
+        
+        return {
+            items: JSON.stringify(items),
+            payment_method: paymentMethod,
+            cash_amount: Stand120.parseNumber($('#cashAmount').val()),
+            transfer_amount: Stand120.parseNumber($('#transferAmount').val()),
+            delivery_fee: Stand120.parseNumber($('#deliveryFee').val()),
+            payment_confirmed: $('#paymentConfirmed').is(':checked') ? 1 : 0
+        };
+    },
+    
+    handleSubmit: function(e) {
+        e.preventDefault();
+        
+        if (this.isSubmitting) {
+            return;
+        }
+        
+        const data = this.collectOrderData();
+        const items = JSON.parse(data.items);
+        const paymentMethod = data.payment_method;
+        
+        // Validation
+        if (items.length === 0) {
+            Stand120.showAlert('danger', 'Please add at least one item to the order.');
+            return;
+        }
+        
+        // Validate payment method is selected
+        if (!paymentMethod) {
+            Stand120.showAlert('danger', 'Please select a payment method.');
+            return;
+        }
+        
+        // Require cash amount when "both" is selected
+        if (paymentMethod === 'both') {
+            const cashAmt = Stand120.parseNumber($('#cashAmount').val()) || 0;
+            if (cashAmt <= 0) {
+                Stand120.showAlert('danger', 'Please enter the cash amount when using both payment methods.');
+                $('#cashAmount').focus();
+                return;
+            }
+        }
+        
+        // Check if confirmation is needed (for transfer or both)
+        if ((paymentMethod === 'transfer' || paymentMethod === 'both') && !data.payment_confirmed) {
+            Stand120.showAlert('warning', 'Please confirm payment has been received before submitting.');
+            return;
+        }
+        
+        // Submit immediately — no confirmation modal delay
+        this.isSubmitting = true;
+        $('#submitOrder').prop('disabled', true).html('<iconify-icon icon="solar:check-circle-linear"></iconify-icon> Submitting...');
+        
+        // Check if offline
+        if (!navigator.onLine) {
+            data.offline = true;
+            Stand120.saveOfflineData('order', data);
+            Stand120.showAlert('info', 'Order saved offline. It will sync when you\'re back online.');
+            this.resetForm();
+            this.isSubmitting = false;
+            $('#submitOrder').prop('disabled', false).html('<iconify-icon icon="solar:check-circle-linear"></iconify-icon> Submit Order');
+            return;
+        }
+        
+        // Reset form immediately for speed — don't wait for server response
+        this.resetForm();
+        this.isSubmitting = false;
+        $('#submitOrder').prop('disabled', false).html('<iconify-icon icon="solar:check-circle-linear"></iconify-icon> Submit Order');
+        
+        // Fire AJAX in background — swift, non-blocking
+        Stand120.ajax('submit_order', data).then(response => {
+            if (response.success) {
+                Stand120.showAlert('success', 'Order #' + (response.data.order_id || '') + ' submitted!');
+            } else {
+                console.warn('Order submission warning:', response.data?.message);
+            }
+        }).catch(error => {
+            console.warn('Order submission error:', error);
+        });
+    },
+    
+    resetForm: function() {
+        $('.qty-input').val(0);
+        $('#deliveryFee, #cashAmount, #transferAmount').val('');
+        $('#paymentConfirmed').prop('checked', false);
+        $('input[name="payment_method"]').prop('checked', false);
+        $('.payment-option').removeClass('selected');
+        $('#cashSection, #transferSection, #confirmationSection').hide();
+        this.calculateTotals();
+    }
+};
+
+/**
+ * Order Preparation Module
+ */
+const OrderPreparation = {
+    data: [],
+    
+    init: function() {
+        this.bindEvents();
+        this.loadData();
+    },
+    
+    bindEvents: function() {
+        const self = this;
+        
+        // Real-time calculation on input change - using multiple events for responsiveness
+        $(document).off('input.orderprep change.orderprep keyup.orderprep', '.prep-added, .prep-sold, .prep-opening');
+        $(document).on('input.orderprep change.orderprep keyup.orderprep', '.prep-added, .prep-sold, .prep-opening', function(e) {
+            self.handleInputChange(e);
+        });
+        
+        // Auto-save remarks per row on change
+        $(document).off('input.orderprep', '.prep-remarks');
+        $(document).on('input.orderprep', '.prep-remarks', function(e) {
+            const $row = $(e.target).closest('tr');
+            clearTimeout($row.data('saveTimeout'));
+            $row.data('saveTimeout', setTimeout(() => self.saveRow($row), 500));
+        });
+        
+        // Save general remarks button
+        $(document).off('click.orderprep', '#savePrepRemarks');
+        $(document).on('click.orderprep', '#savePrepRemarks', function() {
+            self.saveGeneralRemarks();
+        });
+    },
+    
+    loadData: function() {
+        const date = $('#prepDate').val() || new Date().toISOString().split('T')[0];
+        
+        Stand120.ajax('get_order_preparation', { date: date }).then(response => {
+            if (response.success) {
+                this.data = response.data.data || [];
+                this.renderTable();
+            }
+        });
+    },
+    
+    renderTable: function() {
+        const $tbody = $('#prepTable tbody');
+        $tbody.empty();
+        
+        const isAdmin = Stand120.config.is_admin;
+        
+        if (!this.data || this.data.length === 0) {
+            $tbody.append('<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">No menu items found. Admin can add menu items in the Admin Panel.</td></tr>');
+            return;
+        }
+        
+        this.data.forEach(item => {
+            const opening = parseFloat(item.opening) || 0;
+            const added = parseFloat(item.total_added) || 0;
+            const sold = parseFloat(item.total_sold) || 0;
+            const closing = opening + added - sold;
+            
+            const row = `
+                <tr data-product-id="${item.product_id}">
+                    <td>${item.product_name}</td>
+                    <td>
+                        <input type="number" class="table-input prep-opening" 
+                            value="${opening}" 
+                            ${!isAdmin ? 'readonly' : ''} 
+                            data-field="opening">
+                    </td>
+                    <td>
+                        <input type="number" class="table-input prep-added auto-save-input" 
+                            value="${added}" min="0" 
+                            data-field="total_added"
+                            data-save-action="save_order_preparation">
+                    </td>
+                    <td>
+                        <input type="number" class="table-input prep-sold auto-save-input" 
+                            value="${sold}" min="0" 
+                            data-field="total_sold"
+                            data-save-action="save_order_preparation">
+                    </td>
+                    <td class="prep-closing formatted-number">${Stand120.formatNumber(closing)}</td>
+                    <td>
+                        <input type="text" class="table-input prep-remarks" 
+                            value="${item.remarks || ''}" placeholder="Add remarks...">
+                    </td>
+                </tr>
+            `;
+            $tbody.append(row);
+        });
+    },
+    
+    handleInputChange: function(e) {
+        const $input = $(e.target);
+        const $row = $input.closest('tr');
+        
+        const opening = parseFloat($row.find('.prep-opening').val()) || 0;
+        const added = parseFloat($row.find('.prep-added').val()) || 0;
+        const sold = parseFloat($row.find('.prep-sold').val()) || 0;
+        const closing = opening + added - sold;
+        
+        // Update closing value immediately
+        $row.find('.prep-closing').text(Stand120.formatNumber(closing));
+        
+        // Auto-save with debounce
+        clearTimeout($row.data('saveTimeout'));
+        $row.data('saveTimeout', setTimeout(() => this.saveRow($row), 500));
+    },
+    
+    saveRow: function($row) {
+        const productId = $row.data('product-id');
+        const added = parseFloat($row.find('.prep-added').val()) || 0;
+        const sold = parseFloat($row.find('.prep-sold').val()) || 0;
+        const remarks = $row.find('.prep-remarks').val() || '';
+        const date = $('#prepDate').val() || new Date().toISOString().split('T')[0];
+        
+        Stand120.ajax('save_order_preparation', {
+            product_id: productId,
+            date: date,
+            total_added: added,
+            total_sold: sold,
+            remarks: remarks
+        }).then(response => {
+            if (response.success) {
+                $row.addClass('saved');
+                setTimeout(() => $row.removeClass('saved'), 500);
+            }
+        });
+    },
+    
+    saveGeneralRemarks: function() {
+        const generalRemarks = $('#prepRemarks').val() || '';
+        const date = $('#prepDate').val() || new Date().toISOString().split('T')[0];
+        
+        // Save the general remarks to all rows that have data
+        const $rows = $('#prepTable tbody tr[data-product-id]');
+        if ($rows.length === 0) {
+            Stand120.showAlert('warning', 'No menu items to save remarks for');
+            return;
+        }
+        
+        // Append general remarks to the first product row
+        const $firstRow = $rows.first();
+        const productId = $firstRow.data('product-id');
+        const existingRemarks = $firstRow.find('.prep-remarks').val() || '';
+        const combinedRemarks = generalRemarks ? (existingRemarks ? existingRemarks + ' | ' + generalRemarks : generalRemarks) : existingRemarks;
+        
+        $firstRow.find('.prep-remarks').val(combinedRemarks);
+        this.saveRow($firstRow);
+        
+        Stand120.showAlert('success', 'Remarks saved successfully');
+        $('#prepRemarks').val('');
+    }
+};
+
+/**
+ * Stock Inventory Module
+ */
+const StockInventory = {
+    data: [],
+    
+    init: function() {
+        this.bindEvents();
+        this.loadData();
+    },
+    
+    bindEvents: function() {
+        const self = this;
+        
+        // Real-time calculation on input change
+        $(document).off('input.stockinv change.stockinv keyup.stockinv', '.stock-used, .stock-opening');
+        $(document).on('input.stockinv change.stockinv keyup.stockinv', '.stock-used, .stock-opening', function(e) {
+            self.handleInputChange(e);
+        });
+    },
+    
+    loadData: function() {
+        const date = $('#stockDate').val() || new Date().toISOString().split('T')[0];
+        
+        Stand120.ajax('get_stock_inventory', { date: date }).then(response => {
+            if (response.success) {
+                this.data = response.data.data || [];
+                this.renderTable();
+            }
+        });
+    },
+    
+    renderTable: function() {
+        const $tbody = $('#stockTable tbody');
+        $tbody.empty();
+        
+        const isAdmin = Stand120.config.is_admin;
+        
+        if (!this.data || this.data.length === 0) {
+            $tbody.append('<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">No products found. Admin can add products in the Admin Panel.</td></tr>');
+            return;
+        }
+        
+        this.data.forEach(item => {
+            const opening = parseFloat(item.opening) || 0;
+            const added = parseFloat(item.added) || 0;
+            const used = parseFloat(item.used) || 0;
+            const closing = opening + added - used;
+            
+            const row = `
+                <tr data-product-id="${item.product_id}">
+                    <td>
+                        ${item.product_name}
+                        <span class="badge badge-${item.product_type}">${item.product_type}</span>
+                    </td>
+                    <td>
+                        <input type="number" class="table-input stock-opening" 
+                            value="${opening}" 
+                            ${!isAdmin ? 'readonly' : ''} 
+                            data-field="opening">
+                    </td>
+                    <td class="stock-added formatted-number">${Stand120.formatNumber(added)}</td>
+                    <td>
+                        <input type="number" class="table-input stock-used auto-save-input" 
+                            value="${used}" min="0" 
+                            data-field="used_packs"
+                            data-save-action="save_stock_inventory">
+                    </td>
+                    <td class="stock-closing formatted-number">${Stand120.formatNumber(closing)}</td>
+                </tr>
+            `;
+            $tbody.append(row);
+        });
+    },
+    
+    handleInputChange: function(e) {
+        const $input = $(e.target);
+        const $row = $input.closest('tr');
+        
+        const opening = parseFloat($row.find('.stock-opening').val()) || 0;
+        const addedText = $row.find('.stock-added').text().replace(/,/g, '');
+        const added = parseFloat(addedText) || 0;
+        const used = parseFloat($row.find('.stock-used').val()) || 0;
+        const closing = opening + added - used;
+        
+        // Update closing value immediately
+        $row.find('.stock-closing').text(Stand120.formatNumber(closing));
+        
+        // Log for debugging
+        
+        // Auto-save with debounce
+        clearTimeout($row.data('saveTimeout'));
+        $row.data('saveTimeout', setTimeout(() => this.saveRow($row), 500));
+    },
+    
+    saveRow: function($row) {
+        const productId = $row.data('product-id');
+        const used = parseFloat($row.find('.stock-used').val()) || 0;
+        const date = $('#stockDate').val() || new Date().toISOString().split('T')[0];
+        
+        Stand120.ajax('save_stock_inventory', {
+            product_id: productId,
+            date: date,
+            used_packs: used
+        }).then(response => {
+            if (response.success) {
+                $row.addClass('saved');
+                setTimeout(() => $row.removeClass('saved'), 500);
+            }
+        });
+    }
+};
+
+/**
+ * Chopping Inventory Module
+ */
+const ChoppingInventory = {
+    data: [],
+    
+    init: function() {
+        this.bindEvents();
+        this.loadData();
+    },
+    
+    bindEvents: function() {
+        const self = this;
+        
+        // Real-time calculation on input change
+        $(document).off('input.chopinv change.chopinv keyup.chopinv', '.chop-prepared, .chop-packs, .chop-remarks, .chop-opening');
+        $(document).on('input.chopinv change.chopinv keyup.chopinv', '.chop-prepared, .chop-packs, .chop-remarks, .chop-opening', function(e) {
+            self.handleInputChange(e);
+        });
+    },
+    
+    loadData: function() {
+        const date = $('#chopDate').val() || new Date().toISOString().split('T')[0];
+        
+        Stand120.ajax('get_chopping_inventory', { date: date }).then(response => {
+            if (response.success) {
+                this.data = response.data.data || [];
+                this.renderTable();
+            }
+        });
+    },
+    
+    renderTable: function() {
+        const $tbody = $('#chopTable tbody');
+        $tbody.empty();
+        
+        const isAdmin = Stand120.config.is_admin;
+        
+        if (!this.data || this.data.length === 0) {
+            $tbody.append('<tr><td colspan="7" style="text-align: center; color: var(--text-muted);">No fruits found. Admin can add fruits in the Admin Panel.</td></tr>');
+            return;
+        }
+        
+        this.data.forEach(item => {
+            const opening = parseFloat(item.opening) || 0;
+            const importVal = parseFloat(item.import) || 0;
+            const prepared = parseFloat(item.prepared) || 0;
+            const closing = opening + importVal - prepared;
+            const packs = parseFloat(item.packs_gotten) || 0;
+            
+            const row = `
+                <tr data-product-id="${item.product_id}">
+                    <td>${item.product_name}</td>
+                    <td>
+                        <input type="number" class="table-input chop-opening" 
+                            value="${opening}" 
+                            ${!isAdmin ? 'readonly' : ''}>
+                    </td>
+                    <td class="chop-import formatted-number">${Stand120.formatNumber(importVal)}</td>
+                    <td>
+                        <input type="number" class="table-input chop-prepared auto-save-input" 
+                            value="${prepared}" min="0">
+                    </td>
+                    <td class="chop-closing formatted-number">${Stand120.formatNumber(closing)}</td>
+                    <td>
+                        <input type="number" class="table-input chop-packs auto-save-input" 
+                            value="${packs}" min="0">
+                    </td>
+                    <td>
+                        <input type="text" class="table-input chop-remarks auto-save-input" 
+                            value="${item.remarks || ''}" placeholder="Add remarks...">
+                    </td>
+                </tr>
+            `;
+            $tbody.append(row);
+        });
+    },
+    
+    handleInputChange: function(e) {
+        const $input = $(e.target);
+        const $row = $input.closest('tr');
+        
+        const opening = parseFloat($row.find('.chop-opening').val()) || 0;
+        const importText = $row.find('.chop-import').text().replace(/,/g, '');
+        const importVal = parseFloat(importText) || 0;
+        const prepared = parseFloat($row.find('.chop-prepared').val()) || 0;
+        const closing = opening + importVal - prepared;
+        
+        // Update closing value immediately
+        $row.find('.chop-closing').text(Stand120.formatNumber(closing));
+        
+        // Log for debugging
+        
+        // Auto-save with debounce
+        clearTimeout($row.data('saveTimeout'));
+        $row.data('saveTimeout', setTimeout(() => this.saveRow($row), 500));
+    },
+    
+    saveRow: function($row) {
+        const productId = $row.data('product-id');
+        const prepared = parseFloat($row.find('.chop-prepared').val()) || 0;
+        const packs = parseFloat($row.find('.chop-packs').val()) || 0;
+        const remarks = $row.find('.chop-remarks').val();
+        const date = $('#chopDate').val() || new Date().toISOString().split('T')[0];
+        
+        Stand120.ajax('save_chopping_inventory', {
+            product_id: productId,
+            date: date,
+            prepared: prepared,
+            packs_gotten: packs,
+            remarks: remarks
+        }).then(response => {
+            if (response.success) {
+                $row.addClass('saved');
+                setTimeout(() => $row.removeClass('saved'), 500);
+            }
+        });
+    }
+};
+
+/**
+ * Import Record Module
+ */
+const ImportRecord = {
+    data: [],
+    
+    init: function() {
+        this.bindEvents();
+        this.loadData();
+    },
+    
+    bindEvents: function() {
+        $(document).on('input', '.import-qty', this.handleInputChange.bind(this));
+    },
+    
+    loadData: function() {
+        const date = $('#importDate').val() || new Date().toISOString().split('T')[0];
+        
+        Stand120.ajax('get_import_records', { date: date }).then(response => {
+            if (response.success) {
+                this.data = response.data.data;
+                this.renderTable();
+            }
+        });
+    },
+    
+    renderTable: function() {
+        const $tbody = $('#importTable tbody');
+        $tbody.empty();
+        
+        this.data.forEach(item => {
+            const statusClass = item.sync_status === 'synced' ? 'status-synced' : 
+                               item.sync_status === 'syncing' ? 'status-syncing' : 'status-pending';
+            
+            const row = `
+                <tr data-product-id="${item.product_id}">
+                    <td>
+                        ${item.product_name}
+                        <span class="badge badge-${item.product_type}">${item.product_type}</span>
+                    </td>
+                    <td>
+                        <input type="number" class="table-input import-qty auto-save-input" 
+                            value="${item.quantity}" min="0">
+                    </td>
+                    <td>
+                        <span class="status-badge ${statusClass}">
+                            <iconify-icon icon="solar:${item.sync_status === 'synced' ? 'check-read-linear' : 'refresh-linear'}"></iconify-icon>
+                            ${item.sync_status}
+                        </span>
+                    </td>
+                </tr>
+            `;
+            $tbody.append(row);
+        });
+    },
+    
+    handleInputChange: function(e) {
+        const $input = $(e.target);
+        const $row = $input.closest('tr');
+        
+        // Update status to syncing
+        $row.find('.status-badge')
+            .removeClass('status-synced status-pending')
+            .addClass('status-syncing')
+            .html('<iconify-icon icon="solar:refresh-linear" class="icon-spin"></iconify-icon> syncing');
+        
+        // Auto-save
+        this.saveRow($row);
+    },
+    
+    saveRow: function($row) {
+        const productId = $row.data('product-id');
+        const quantity = parseFloat($row.find('.import-qty').val()) || 0;
+        const date = $('#importDate').val() || new Date().toISOString().split('T')[0];
+        
+        Stand120.ajax('save_import_record', {
+            product_id: productId,
+            date: date,
+            quantity: quantity
+        }).then(response => {
+            if (response.success) {
+                $row.find('.status-badge')
+                    .removeClass('status-syncing status-pending')
+                    .addClass('status-synced')
+                    .html('<iconify-icon icon="solar:check-read-linear"></iconify-icon> synced');
+            }
+        });
+    }
+};
+
+/**
+ * Financial Summary Module
+ */
+const FinancialSummary = {
+    data: {},
+    saveTimeout: null,
+    
+    init: function() {
+        this.bindEvents();
+        this.loadData();
+    },
+    
+    bindEvents: function() {
+        const self = this;
+        
+        // Real-time calculation on extras, expenses, and market card cash left input
+        $(document).off('input.finsummary change.finsummary keyup.finsummary', '#extrasAmount, #expensesAmount, #marketCardCash');
+        $(document).on('input.finsummary change.finsummary keyup.finsummary', '#extrasAmount, #expensesAmount, #marketCardCash', function() {
+            self.calculateCashLeft();
+            self.debouncedSave();
+        });
+        
+        // Auto-save for remarks
+        $(document).off('input.finsummary change.finsummary', '#extrasRemark, #expensesRemark');
+        $(document).on('input.finsummary change.finsummary', '#extrasRemark, #expensesRemark', function() {
+            self.debouncedSave();
+        });
+    },
+    
+    debouncedSave: function() {
+        clearTimeout(this.saveTimeout);
+        this.saveTimeout = setTimeout(() => this.saveData(), 500);
+    },
+    
+    loadData: function() {
+        const date = $('#finDate').val() || new Date().toISOString().split('T')[0];
+        
+        Stand120.ajax('get_financial_summary', { date: date }).then(response => {
+            if (response.success) {
+                this.data = response.data || {};
+                this.renderData();
+            }
+        });
+    },
+    
+    renderData: function() {
+        const data = this.data;
+        
+        $('#totalSales').html('<span class="naira">₦</span>' + Stand120.formatNumber(data.total_sales || 0));
+        $('#transferSales').html('<span class="naira">₦</span>' + Stand120.formatNumber(data.transfer_sales || 0));
+        $('#cashSales').html('<span class="naira">₦</span>' + Stand120.formatNumber(data.cash_sales || 0));
+        $('#deliveryFees').html('<span class="naira">₦</span>' + Stand120.formatNumber(data.delivery_fees || 0));
+        $('#oldCash').html('<span class="naira">₦</span>' + Stand120.formatNumber(data.old_cash || 0));
+        
+        $('#extrasAmount').val(data.extras_amount || '');
+        $('#extrasRemark').val(data.extras_remark || '');
+        $('#expensesAmount').val(data.expenses_amount || '');
+        $('#expensesRemark').val(data.expenses_remark || '');
+        $('#marketCardCash').val(data.market_card_cash || '');
+        
+        this.calculateCashLeft();
+    },
+    
+    handleInputChange: function() {
+        this.calculateCashLeft();
+        this.debouncedSave();
+    },
+    
+    calculateCashLeft: function() {
+        const cashSalesText = $('#cashSales').text().replace(/[₦,]/g, '');
+        const cashSales = parseFloat(cashSalesText) || 0;
+        
+        const oldCashText = $('#oldCash').text().replace(/[₦,]/g, '');
+        const oldCash = parseFloat(oldCashText) || 0;
+        
+        const extrasVal = $('#extrasAmount').val() || '0';
+        const extras = parseFloat(extrasVal.toString().replace(/,/g, '')) || 0;
+        
+        const marketCardCashVal = $('#marketCardCash').val() || '0';
+        const marketCardCash = parseFloat(marketCardCashVal.toString().replace(/,/g, '')) || 0;
+        
+        const expensesVal = $('#expensesAmount').val() || '0';
+        const expenses = parseFloat(expensesVal.toString().replace(/,/g, '')) || 0;
+        
+        const cashLeft = (cashSales + oldCash + extras + marketCardCash) - expenses;
+        
+        // Update cash left immediately
+        $('#cashLeft').html('<span class="naira">₦</span>' + Stand120.formatNumber(cashLeft));
+        
+        // Log for debugging
+    },
+    
+    saveData: function() {
+        const date = $('#finDate').val() || new Date().toISOString().split('T')[0];
+        
+        Stand120.ajax('save_financial_summary', {
+            date: date,
+            extras_amount: Stand120.parseNumber($('#extrasAmount').val()),
+            extras_remark: $('#extrasRemark').val(),
+            expenses_amount: Stand120.parseNumber($('#expensesAmount').val()),
+            expenses_remark: $('#expensesRemark').val(),
+            market_card_cash: Stand120.parseNumber($('#marketCardCash').val())
+        });
+    }
+};
+
+/**
+ * Product Summary Module
+ */
+const ProductSummary = {
+    init: function() {
+        this.bindEvents();
+        this.loadData();
+    },
+    
+    bindEvents: function() {
+        $(document).on('click', '#filterBtn', this.loadData.bind(this));
+    },
+    
+    loadData: function() {
+        const dateFrom = $('#dateFrom').val() || new Date().toISOString().split('T')[0];
+        const dateTo = $('#dateTo').val() || new Date().toISOString().split('T')[0];
+        
+        Stand120.ajax('get_product_summary', {
+            date_from: dateFrom,
+            date_to: dateTo
+        }).then(response => {
+            if (response.success) {
+                this.renderSummary(response.data.summary);
+                this.renderTable(response.data.records);
+            }
+        });
+    },
+    
+    renderSummary: function(summary) {
+        $('#totalProductsSold').text(Stand120.formatNumber(summary.total_products_sold));
+        $('#totalRevenue').html('<span class="naira">₦</span>' + Stand120.formatNumber(summary.total_revenue));
+        $('#activeStaff').text(summary.active_staff_today);
+    },
+    
+    renderTable: function(records) {
+        const $tbody = $('#summaryTable tbody');
+        $tbody.empty();
+        
+        records.forEach(record => {
+            const row = `
+                <tr>
+                    <td>${record.time}</td>
+                    <td>${record.date}</td>
+                    <td>${record.product}</td>
+                    <td>${record.staff || '-'}</td>
+                    <td class="formatted-number">${record.quantity}</td>
+                    <td class="formatted-number"><span class="naira">₦</span>${Stand120.formatNumber(record.amount)}</td>
+                </tr>
+            `;
+            $tbody.append(row);
+        });
+    }
+};
+
+/**
+ * Admin Panel Module
+ */
+const AdminPanel = {
+    orderPage: 1,
+    
+    init: function() {
+        this.bindEvents();
+        this.loadData();
+        this.loadOpeningValues();
+        if (Stand120.config.is_super_admin) {
+            this.loadDiagnostics();
+        }
+    },
+    
+    bindEvents: function() {
+        $(document).on('click', '#addProduct', this.addProductRow.bind(this));
+        $(document).on('click', '.delete-product', this.deleteProduct.bind(this));
+        $(document).on('click', '#saveProducts', this.saveProducts.bind(this));
+        $(document).on('click', '#addStaff', this.showAddStaffModal.bind(this));
+        $(document).on('click', '.edit-staff', this.editStaff.bind(this));
+        $(document).on('click', '.delete-staff', this.deleteStaff.bind(this));
+        $(document).on('click', '#saveOpeningValues', this.saveOpeningValues.bind(this));
+        $(document).on('change', '#openingDate', this.loadOpeningValues.bind(this));
+        $(document).on('click', '#clearAllRecords', this.clearAllRecords.bind(this));
+        $(document).on('click', '#clearCache', this.clearCache.bind(this));
+        $(document).on('click', '#exportData', this.exportData.bind(this));
+        $(document).on('click', '#loadOrders', this.loadOrders.bind(this));
+        $(document).on('click', '.delete-order', this.deleteOrder.bind(this));
+        $(document).on('click', '#prevOrderPage', () => { this.orderPage--; this.loadOrders(); });
+        $(document).on('click', '#nextOrderPage', () => { this.orderPage++; this.loadOrders(); });
+        $(document).on('click', '#refreshDiagnostics', this.loadDiagnostics.bind(this));
+        $(document).on('click', '#superAdminClearAll', this.clearAllRecords.bind(this));
+    },
+    
+    loadData: function() {
+        Stand120.ajax('get_products').then(response => {
+            if (response.success) {
+                this.renderProducts(response.data.products);
+            }
+        });
+        
+        Stand120.ajax('get_staff').then(response => {
+            if (response.success) {
+                this.renderStaff(response.data.staff);
+            }
+        });
+    },
+    
+    renderProducts: function(products) {
+        const $tbody = $('#productsTable tbody');
+        $tbody.empty();
+        
+        products.forEach(product => {
+            const row = `
+                <tr data-id="${product.id}">
+                    <td><input type="text" class="table-input product-name" value="${product.name}"></td>
+                    <td><input type="text" class="table-input product-price number-input" value="${Stand120.formatNumber(product.price)}"></td>
+                    <td>
+                        <select class="table-input product-type">
+                            <option value="menu" ${product.type === 'menu' ? 'selected' : ''}>Menu Item</option>
+                            <option value="fruit" ${product.type === 'fruit' ? 'selected' : ''}>Fruit</option>
+                            <option value="non_fruit" ${product.type === 'non_fruit' ? 'selected' : ''}>Non-Fruit</option>
+                        </select>
+                    </td>
+                    <td>
+                        <button class="btn btn-sm btn-danger delete-product"><iconify-icon icon="solar:trash-bin-trash-linear"></iconify-icon></button>
+                    </td>
+                </tr>
+            `;
+            $tbody.append(row);
+        });
+    },
+    
+    addProductRow: function() {
+        const row = `
+            <tr data-id="new">
+                <td><input type="text" class="table-input product-name" placeholder="Product name"></td>
+                <td><input type="text" class="table-input product-price number-input" placeholder="0"></td>
+                <td>
+                    <select class="table-input product-type">
+                        <option value="menu">Menu Item</option>
+                        <option value="fruit">Fruit</option>
+                        <option value="non_fruit">Non-Fruit</option>
+                    </select>
+                </td>
+                <td>
+                    <button class="btn btn-sm btn-danger delete-product"><iconify-icon icon="solar:trash-bin-trash-linear"></iconify-icon></button>
+                </td>
+            </tr>
+        `;
+        $('#productsTable tbody').append(row);
+    },
+    
+    deleteProduct: async function(e) {
+        const $row = $(e.target).closest('tr');
+        const id = $row.data('id');
+        
+        if (id === 'new') {
+            $row.remove();
+            return;
+        }
+        
+        const confirmed = await Stand120.showModal({
+            title: 'Delete Product',
+            content: 'Are you sure you want to delete this product?',
+            confirmText: 'Delete'
+        });
+        
+        if (confirmed) {
+            Stand120.ajax('delete_product', { id: id }).then(response => {
+                if (response.success) {
+                    $row.remove();
+                    Stand120.showAlert('success', 'Product deleted successfully');
+                }
+            });
+        }
+    },
+    
+    saveProducts: function() {
+        const products = [];
+        
+        $('#productsTable tbody tr').each(function() {
+            const $row = $(this);
+            products.push({
+                id: $row.data('id') === 'new' ? null : $row.data('id'),
+                name: $row.find('.product-name').val(),
+                price: Stand120.parseNumber($row.find('.product-price').val()),
+                type: $row.find('.product-type').val()
+            });
+        });
+        
+        Stand120.showLoading('Saving products...');
+        
+        // Save each product individually
+        const promises = products.map(product => {
+            if (product.id) {
+                return Stand120.ajax('update_product', product);
+            } else {
+                return Stand120.ajax('add_product', product);
+            }
+        });
+        
+        Promise.all(promises).then((results) => {
+            Stand120.hideLoading();
+            const failed = results.filter(result => !result.success);
+            if (failed.length) {
+                Stand120.showAlert('danger', failed[0].data?.message || 'Failed to save some products');
+                return;
+            }
+            Stand120.showAlert('success', 'Products saved successfully');
+            this.loadData();
+        }).catch(() => {
+            Stand120.hideLoading();
+            Stand120.showAlert('danger', 'Failed to save some products');
+        });
+    },
+    
+    renderStaff: function(staff) {
+        const $tbody = $('#staffTable tbody');
+        $tbody.empty();
+        
+        staff.forEach(s => {
+            const row = `
+                <tr data-id="${s.id}">
+                    <td>${s.full_name}</td>
+                    <td>${s.phone || '-'}</td>
+                    <td>${s.role}</td>
+                    <td>${s.status}</td>
+                    <td>
+                        <button class="btn btn-sm btn-secondary edit-staff"><iconify-icon icon="solar:pen-linear"></iconify-icon></button>
+                        <button class="btn btn-sm btn-danger delete-staff"><iconify-icon icon="solar:trash-bin-trash-linear"></iconify-icon></button>
+                    </td>
+                </tr>
+            `;
+            $tbody.append(row);
+        });
+    },
+    
+    showAddStaffModal: function() {
+        const content = `
+            <form id="staffForm">
+                <div class="form-group">
+                    <label class="form-label">Full Name</label>
+                    <input type="text" class="form-control" name="full_name" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Username</label>
+                    <input type="text" class="form-control" name="username" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Email</label>
+                    <input type="email" class="form-control" name="email" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Phone</label>
+                    <input type="text" class="form-control" name="phone">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Password</label>
+                    <input type="password" class="form-control" name="password" required>
+                </div>
+            </form>
+        `;
+        
+        Stand120.showModal({
+            title: 'Add Staff',
+            content: content,
+            confirmText: 'Add Staff'
+        }).then(confirmed => {
+            if (confirmed) {
+                const formData = {};
+                $('#staffForm').serializeArray().forEach(item => {
+                    formData[item.name] = item.value;
+                });
+                
+                Stand120.ajax('create_staff', formData).then(response => {
+                    if (response.success) {
+                        Stand120.showAlert('success', 'Staff added successfully');
+                        this.loadData();
+                    } else {
+                        Stand120.showAlert('danger', response.data?.message || 'Failed to add staff');
+                    }
+                });
+            }
+        });
+    },
+    
+    editStaff: function(e) {
+        const $row = $(e.target).closest('tr');
+        const staffId = $row.data('id');
+        const currentName = $row.find('td').eq(0).text().trim();
+        const currentPhone = $row.find('td').eq(1).text().trim();
+        const currentStatus = $row.find('td').eq(3).text().trim();
+        
+        const content = `
+            <form id="staffEditForm">
+                <div class="form-group">
+                    <label class="form-label">Full Name</label>
+                    <input type="text" class="form-control" name="full_name" value="${currentName}" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Phone</label>
+                    <input type="text" class="form-control" name="phone" value="${currentPhone === '-' ? '' : currentPhone}">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Status</label>
+                    <select class="form-control" name="status">
+                        <option value="active" ${currentStatus === 'active' ? 'selected' : ''}>Active</option>
+                        <option value="inactive" ${currentStatus === 'inactive' ? 'selected' : ''}>Inactive</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">New Password (optional)</label>
+                    <input type="password" class="form-control" name="password" placeholder="Leave blank to keep current">
+                </div>
+            </form>
+        `;
+        
+        Stand120.showModal({
+            title: 'Edit Staff',
+            content: content,
+            confirmText: 'Save Changes'
+        }).then(confirmed => {
+            if (confirmed) {
+                const formData = {};
+                $('#staffEditForm').serializeArray().forEach(item => {
+                    formData[item.name] = item.value;
+                });
+                
+                formData.staff_id = staffId;
+                
+                Stand120.ajax('update_staff', formData).then(response => {
+                    if (response.success) {
+                        Stand120.showAlert('success', 'Staff updated successfully');
+                        this.loadData();
+                    } else {
+                        Stand120.showAlert('danger', response.data?.message || 'Failed to update staff');
+                    }
+                });
+            }
+        });
+    },
+    
+    deleteStaff: async function(e) {
+        const $row = $(e.target).closest('tr');
+        const staffId = $row.data('id');
+        
+        const confirmed = await Stand120.showModal({
+            title: 'Delete Staff',
+            content: 'Are you sure you want to delete this staff member?',
+            confirmText: 'Delete'
+        });
+        
+        if (confirmed) {
+            Stand120.ajax('delete_staff', { staff_id: staffId }).then(response => {
+                if (response.success) {
+                    $row.remove();
+                    Stand120.showAlert('success', 'Staff deleted successfully');
+                }
+            });
+        }
+    },
+    
+    loadOpeningValues: function() {
+        const date = $('#openingDate').val() || new Date().toISOString().split('T')[0];
+        
+        const requests = [
+            Stand120.ajax('get_order_preparation', { date: date }),
+            Stand120.ajax('get_stock_inventory', { date: date }),
+            Stand120.ajax('get_chopping_inventory', { date: date })
+        ];
+        
+        Promise.all(requests).then(([prepResponse, stockResponse, chopResponse]) => {
+            if (prepResponse?.success) {
+                this.renderOpeningTable('#prepOpeningTable tbody', prepResponse.data.data, 'opening');
+            }
+            if (stockResponse?.success) {
+                this.renderOpeningTable('#stockOpeningTable tbody', stockResponse.data.data, 'opening');
+            }
+            if (chopResponse?.success) {
+                this.renderOpeningTable('#chopOpeningTable tbody', chopResponse.data.data, 'opening');
+            }
+        });
+    },
+    
+    renderOpeningTable: function(selector, items, openingField) {
+        const $tbody = $(selector);
+        $tbody.empty();
+        
+        if (!items || items.length === 0) {
+            $tbody.append('<tr><td colspan="2" style="text-align:center;color:var(--text-muted)">No data</td></tr>');
+            return;
+        }
+        
+        items.forEach(item => {
+            const openingValue = parseFloat(item[openingField]) || 0;
+            const row = `
+                <tr data-product-id="${item.product_id}">
+                    <td>${item.product_name}</td>
+                    <td>
+                        <input type="number" class="table-input opening-value" value="${openingValue}" min="0">
+                    </td>
+                </tr>
+            `;
+            $tbody.append(row);
+        });
+    },
+    
+    saveOpeningValues: function() {
+        const date = $('#openingDate').val() || new Date().toISOString().split('T')[0];
+        
+        const collectValues = (selector) => {
+            const values = [];
+            $(selector).find('tr[data-product-id]').each(function() {
+                const productId = $(this).data('product-id');
+                const value = parseFloat($(this).find('.opening-value').val()) || 0;
+                values.push({ product_id: productId, value: value });
+            });
+            return values;
+        };
+        
+        const requests = [
+            Stand120.ajax('update_all_opening_values', {
+                table: 'order_preparation',
+                date: date,
+                values: collectValues('#prepOpeningTable tbody')
+            }),
+            Stand120.ajax('update_all_opening_values', {
+                table: 'stock_inventory',
+                date: date,
+                values: collectValues('#stockOpeningTable tbody')
+            }),
+            Stand120.ajax('update_all_opening_values', {
+                table: 'chopping_inventory',
+                date: date,
+                values: collectValues('#chopOpeningTable tbody')
+            })
+        ];
+        
+        Stand120.showLoading('Saving opening values...');
+        Promise.all(requests).then((results) => {
+            Stand120.hideLoading();
+            const failed = results.find(result => !result.success);
+            if (failed) {
+                Stand120.showAlert('danger', failed.data?.message || 'Failed to save opening values');
+                return;
+            }
+            Stand120.showAlert('success', 'Opening values saved');
+        }).catch(() => {
+            Stand120.hideLoading();
+            Stand120.showAlert('danger', 'Failed to save opening values');
+        });
+    },
+    
+    clearAllRecords: async function() {
+        const confirmed = await Stand120.showModal({
+            title: 'Clear All Records',
+            content: 'This will permanently delete all orders, histories, and analytics records. This action cannot be undone.',
+            confirmText: 'Clear All'
+        });
+        
+        if (confirmed) {
+            const secondConfirm = await this.confirmClearAllRecords();
+            if (!secondConfirm) {
+                return;
+            }
+            
+            Stand120.showLoading('Clearing records...');
+            Stand120.ajax('clear_all_records').then(response => {
+                Stand120.hideLoading();
+                if (response.success) {
+                    Stand120.showAlert('success', 'All records have been cleared');
+                    this.loadData();
+                    this.loadOpeningValues();
+                } else {
+                    Stand120.showAlert('danger', response.data?.message || 'Failed to clear records');
+                }
+            }).catch(() => {
+                Stand120.hideLoading();
+                Stand120.showAlert('danger', 'Failed to clear records');
+            });
+        }
+    },
+    
+    confirmClearAllRecords: function() {
+        const modal = $(`
+            <div class="modal-overlay active">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3 class="modal-title">Final Confirmation</h3>
+                        <button class="modal-close"><iconify-icon icon="solar:close-circle-linear"></iconify-icon></button>
+                    </div>
+                    <div class="modal-body">
+                        <p>Type <strong>CLEAR</strong> to confirm you want to delete all records.</p>
+                        <input type="text" class="form-control" id="clearConfirmInput" placeholder="Type CLEAR">
+                        <p class="clear-confirm-error" style="color: var(--danger-color); margin-top: 8px; display: none;">Please type CLEAR to continue.</p>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary modal-cancel">Cancel</button>
+                        <button class="btn btn-danger modal-confirm">Yes, Clear</button>
+                    </div>
+                </div>
+            </div>
+        `);
+        
+        $('body').append(modal);
+        
+        return new Promise((resolve) => {
+            modal.find('.modal-confirm').on('click', function() {
+                const value = modal.find('#clearConfirmInput').val().trim().toUpperCase();
+                if (value !== 'CLEAR') {
+                    modal.find('.clear-confirm-error').show();
+                    return;
+                }
+                Stand120.closeModal();
+                resolve(true);
+            });
+            
+            modal.find('.modal-cancel, .modal-close').on('click', function() {
+                Stand120.closeModal();
+                resolve(false);
+            });
+        });
+    },
+    
+    clearCache: function() {
+        localStorage.removeItem('stand120_cache');
+        localStorage.removeItem('stand120_offline_queue');
+        Stand120.showAlert('success', 'Cache cleared successfully');
+    },
+    
+    loadOrders: function() {
+        Stand120.ajax('get_all_orders', {
+            date_from: $('#orderDateFrom').val(),
+            date_to: $('#orderDateTo').val(),
+            page: this.orderPage || 1,
+            per_page: 20
+        }).then(response => {
+            if (response.success) {
+                this.renderOrders(response.data.orders || []);
+                const data = response.data;
+                $('#orderCurrentPage').text(data.page);
+                $('#orderTotalPages').text(data.total_pages);
+                $('#prevOrderPage').prop('disabled', data.page <= 1);
+                $('#nextOrderPage').prop('disabled', data.page >= data.total_pages);
+            }
+        });
+    },
+    
+    renderOrders: function(orders) {
+        const $tbody = $('#adminOrdersTable tbody').empty();
+        if (orders.length === 0) {
+            $tbody.append('<tr><td colspan="7" style="text-align:center;color:var(--text-muted)">No orders found</td></tr>');
+            return;
+        }
+        orders.forEach(order => {
+            $tbody.append(`<tr data-order-id="${order.id}">
+                <td>#${order.id}</td>
+                <td>${order.order_date}</td>
+                <td>${order.staff_name || '-'}</td>
+                <td>${order.item_count || 0}</td>
+                <td class="formatted-number"><span class="naira">₦</span>${Stand120.formatNumber(order.grand_total)}</td>
+                <td>${order.payment_method}</td>
+                <td>
+                    <button class="btn btn-sm btn-danger delete-order"><iconify-icon icon="solar:trash-bin-trash-linear"></iconify-icon> Delete</button>
+                </td>
+            </tr>`);
+        });
+    },
+    
+    deleteOrder: async function(e) {
+        const $row = $(e.target).closest('tr');
+        const orderId = $row.data('order-id');
+        
+        const confirmed = await Stand120.showModal({
+            title: 'Delete Order',
+            content: '<p>Are you sure you want to delete this order? This will also update the financial summary for that day.</p>',
+            confirmText: 'Delete Order'
+        });
+        
+        if (!confirmed) return;
+        
+        Stand120.showLoading('Deleting order...');
+        Stand120.ajax('delete_order', { order_id: orderId }).then(response => {
+            Stand120.hideLoading();
+            if (response.success) {
+                Stand120.showAlert('success', response.data.message || 'Order deleted successfully');
+                this.loadOrders();
+            } else {
+                Stand120.showAlert('danger', response.data?.message || 'Failed to delete order');
+            }
+        }).catch(() => {
+            Stand120.hideLoading();
+            Stand120.showAlert('danger', 'Failed to delete order');
+        });
+    },
+    
+    loadDiagnostics: function() {
+        const $list = $('#diagnosticsList');
+        $list.html('<div style="text-align: center; padding: 40px; color: var(--text-muted);"><iconify-icon icon="solar:refresh-linear" style="font-size: 2rem;"></iconify-icon><p style="margin-top: 8px;">Loading diagnostics...</p></div>');
+        
+        Stand120.ajax('get_system_diagnostics').then(response => {
+            if (response.success) {
+                this.renderDiagnostics(response.data);
+            } else {
+                $list.html('<div style="text-align: center; padding: 40px; color: var(--danger-color);"><iconify-icon icon="solar:close-circle-linear" style="font-size: 2rem;"></iconify-icon><p style="margin-top: 8px;">' + (response.data?.message || 'Failed to load diagnostics') + '</p></div>');
+            }
+        }).catch(() => {
+            $list.html('<div style="text-align: center; padding: 40px; color: var(--danger-color);"><iconify-icon icon="solar:close-circle-linear" style="font-size: 2rem;"></iconify-icon><p style="margin-top: 8px;">Failed to load diagnostics</p></div>');
+        });
+    },
+    
+    renderDiagnostics: function(data) {
+        const summary = data.summary || {};
+        const diagnostics = data.diagnostics || [];
+        
+        $('#diagGoodCount').text(summary.good || 0);
+        $('#diagWarningCount').text(summary.warnings || 0);
+        $('#diagErrorCount').text(summary.errors || 0);
+        
+        const $list = $('#diagnosticsList');
+        $list.empty();
+        
+        if (diagnostics.length === 0) {
+            $list.html('<div style="text-align: center; padding: 40px; color: var(--text-muted);">No diagnostics data available.</div>');
+            return;
+        }
+        
+        diagnostics.forEach(item => {
+            const statusClass = 'diagnostics-status-' + item.status;
+            const statusIcon = item.status === 'good' ? 'solar:check-circle-bold' : (item.status === 'warning' ? 'solar:danger-triangle-bold' : 'solar:close-circle-bold');
+            const statusLabel = item.status === 'good' ? 'Working' : (item.status === 'warning' ? 'Warning' : 'Error');
+            
+            let fixHtml = '';
+            if (item.fix) {
+                fixHtml = '<div class="diagnostics-fix"><iconify-icon icon="solar:lightbulb-linear"></iconify-icon> <strong>Fix:</strong> ' + $('<span>').text(item.fix).html() + '</div>';
+            }
+            
+            const card = $('<div>').addClass('diagnostics-card ' + statusClass).html(
+                '<div class="diagnostics-card-header">' +
+                    '<div class="diagnostics-card-title">' +
+                        '<iconify-icon icon="' + statusIcon + '" class="diagnostics-status-icon"></iconify-icon>' +
+                        '<span>' + $('<span>').text(item.feature).html() + '</span>' +
+                    '</div>' +
+                    '<span class="diagnostics-badge ' + statusClass + '">' + statusLabel + '</span>' +
+                '</div>' +
+                '<div class="diagnostics-card-body">' +
+                    '<p class="diagnostics-detail"><iconify-icon icon="solar:document-text-linear"></iconify-icon> ' + $('<span>').text(item.detail).html() + '</p>' +
+                    '<p class="diagnostics-page"><iconify-icon icon="solar:link-linear"></iconify-icon> Page: ' + $('<span>').text(item.page).html() + '</p>' +
+                    fixHtml +
+                '</div>'
+            );
+            
+            $list.append(card);
+        });
+    },
+    
+    exportData: function() {
+        const today = new Date();
+        const startDate = new Date(today);
+        startDate.setDate(today.getDate() - 30);
+        const todayValue = today.toISOString().split('T')[0];
+        const startValue = startDate.toISOString().split('T')[0];
+        const content = `
+            <form id="exportForm">
+                <div class="form-group">
+                    <label class="form-label">Data Type</label>
+                    <select class="form-control" name="type">
+                        <option value="orders">Orders</option>
+                        <option value="financial">Financial Summary</option>
+                        <option value="stock">Stock Inventory</option>
+                        <option value="preparation">Order Preparation</option>
+                        <option value="chopping">Chopping Inventory</option>
+                        <option value="imports">Import Records</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">From Date</label>
+                    <input type="date" class="form-control" name="date_from" value="${startValue}">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">To Date</label>
+                    <input type="date" class="form-control" name="date_to" value="${todayValue}">
+                </div>
+            </form>
+        `;
+        
+        Stand120.showModal({
+            title: 'Export Data',
+            content: content,
+            confirmText: 'Download'
+        }).then(confirmed => {
+            if (!confirmed) {
+                return;
+            }
+            
+            const formData = {};
+            $('#exportForm').serializeArray().forEach(item => {
+                formData[item.name] = item.value;
+            });
+            
+            Stand120.showLoading('Preparing export...');
+            Stand120.ajax('export_data', formData).then(response => {
+                Stand120.hideLoading();
+                if (response.success) {
+                    const exportData = response.data?.data || [];
+                    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    const dateFrom = formData.date_from || '';
+                    const dateTo = formData.date_to || '';
+                    let rangeLabel = 'complete';
+                    if (dateFrom && dateTo) {
+                        rangeLabel = `${dateFrom}-to-${dateTo}`;
+                    } else if (dateFrom) {
+                        rangeLabel = `from-${dateFrom}`;
+                    } else if (dateTo) {
+                        rangeLabel = `to-${dateTo}`;
+                    }
+                    link.href = url;
+                    link.download = `stand120-${formData.type}-${rangeLabel}.json`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                } else {
+                    Stand120.showAlert('danger', response.data?.message || 'Failed to export data');
+                }
+            }).catch(() => {
+                Stand120.hideLoading();
+                Stand120.showAlert('danger', 'Failed to export data');
+            });
+        });
+    }
+};
+
+/**
+ * Login Module
+ */
+const Login = {
+    fallbackDelay: 200,
+    init: function() {
+        this.bindEvents();
+    },
+    
+    bindEvents: function() {
+        $(document).on('submit', '#loginForm', this.handleLogin.bind(this));
+    },
+    
+    handleLogin: function(e) {
+        e.preventDefault();
+        
+        const username = $('#username').val().trim();
+        const password = $('#password').val();
+        
+        if (!username || !password) {
+            Stand120.showAlert('danger', 'Please enter username and password');
+            return;
+        }
+        
+        $('#loginBtn').prop('disabled', true).html('<span class="loading-spinner"></span> Logging in...');
+        
+        Stand120.ajax('login', {
+            username: username,
+            password: password
+        }).then(response => {
+            if (response.success) {
+                // Small delay to ensure cookies are properly set before redirect
+                setTimeout(function() {
+                    window.location.href = Stand120.config.home_url || '/120-stand/';
+                }, 300);
+            } else {
+                const fallbackDelay = this.fallbackDelay;
+                const handleLoginFailure = () => {
+                    Stand120.showAlert('danger', response.data?.message || 'Login failed');
+                    $('#loginBtn').prop('disabled', false).html('<iconify-icon icon="solar:login-2-linear"></iconify-icon> Login');
+                };
+                
+                setTimeout(() => {
+                    Stand120.ajax('check_login_status')
+                        .then(status => {
+                            if (status.success && status.data?.is_logged_in) {
+                                window.location.href = Stand120.config.home_url || '/120-stand/';
+                                return;
+                            }
+                            handleLoginFailure();
+                        })
+                        .catch(handleLoginFailure);
+                }, fallbackDelay);
+            }
+        }).catch(() => {
+            Stand120.showAlert('danger', 'An error occurred. Please try again.');
+            $('#loginBtn').prop('disabled', false).html('<iconify-icon icon="solar:login-2-linear"></iconify-icon> Login');
+        });
+    }
+};
