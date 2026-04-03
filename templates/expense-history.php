@@ -7,7 +7,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-$page_title = 'Market Expense History - 120 Stand Inventory';
+$page_title = 'Card Expense History - 120 Stand Inventory';
 $is_admin = Stand120_Auth::is_admin();
 $is_super_admin = Stand120_Auth::is_super_admin();
 include STAND120_PLUGIN_DIR . 'templates/partials/header.php';
@@ -16,7 +16,7 @@ include STAND120_PLUGIN_DIR . 'templates/partials/header.php';
 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; margin-bottom: 24px;">
     <h1 class="page-title" style="margin-bottom: 0;">
         <iconify-icon icon="solar:history-linear"></iconify-icon>
-        Market Expense History
+        Card Expense History
     </h1>
     <a href="<?php echo home_url('/120-stand/expense-record/'); ?>" class="btn btn-primary">
         <iconify-icon icon="solar:arrow-left-linear"></iconify-icon> Back
@@ -47,7 +47,7 @@ include STAND120_PLUGIN_DIR . 'templates/partials/header.php';
         <div class="summary-card-icon">
             <iconify-icon icon="solar:money-bag-linear"></iconify-icon>
         </div>
-        <span class="summary-card-label">Total Market Expenses</span>
+        <span class="summary-card-label">Total Card Expenses</span>
         <span id="totalExpenses" class="summary-card-value"><span class="naira">₦</span>0</span>
     </div>
     <div class="summary-card glass-card">

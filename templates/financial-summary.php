@@ -58,8 +58,8 @@ include STAND120_PLUGIN_DIR . 'templates/partials/header.php';
     
     <p style="color: var(--text-muted); margin-bottom: 20px; font-size: 0.9rem;">
         <iconify-icon icon="solar:info-circle-linear"></iconify-icon> 
-        Cash Left = (Cash Sales + Old Cash + Extras + Market Card Cash) - Expenses. 
-        Only Extras, Expenses, and Market Card Cash fields are editable. Values auto-save.
+        Cash Left = (Cash Sales + Old Cash + Extras + Market Card Cash Left) - Cash Expenses. 
+        Only Extras, Cash Expenses, and Market Card Cash Left fields are editable. Values auto-save.
     </p>
     
     <div class="table-responsive">
@@ -114,7 +114,7 @@ include STAND120_PLUGIN_DIR . 'templates/partials/header.php';
                 <tr>
                     <td style="font-weight: 600;">
                         <iconify-icon icon="solar:card-linear" style="color: var(--info-color);"></iconify-icon>
-                        Market Card Cash (₦)
+                        Market Card Cash Left (₦)
                     </td>
                     <td>
                         <input type="text" id="marketCardCash" class="table-input number-input" placeholder="0" style="max-width: 150px;">
@@ -123,7 +123,7 @@ include STAND120_PLUGIN_DIR . 'templates/partials/header.php';
                 <tr>
                     <td style="font-weight: 600;">
                         <iconify-icon icon="solar:minus-circle-linear" style="color: var(--danger-color);"></iconify-icon>
-                        Expenses Amount (₦)
+                        Cash Expenses Amount (₦)
                     </td>
                     <td>
                         <input type="text" id="expensesAmount" class="table-input number-input" placeholder="0" style="max-width: 150px;">
@@ -132,7 +132,7 @@ include STAND120_PLUGIN_DIR . 'templates/partials/header.php';
                 <tr>
                     <td style="font-weight: 600;">
                         <iconify-icon icon="solar:chat-dots-linear" style="color: var(--text-muted);"></iconify-icon>
-                        Expenses Remark
+                        Cash Expense Remark
                     </td>
                     <td>
                         <input type="text" id="expensesRemark" class="table-input" placeholder="Enter expenses description..." style="max-width: 300px;">
@@ -159,7 +159,7 @@ include STAND120_PLUGIN_DIR . 'templates/partials/header.php';
     
     <p style="color: var(--text-muted); margin-top: 16px; font-size: 0.85rem; text-align: center;">
         <iconify-icon icon="solar:info-circle-linear"></iconify-icon> 
-        Formula: Cash Left = (Cash Sales + Old Cash + Extras + Market Card Cash) - Expenses
+        Formula: Cash Left = (Cash Sales + Old Cash + Extras + Market Card Cash Left) - Cash Expenses
     </p>
 </div>
 

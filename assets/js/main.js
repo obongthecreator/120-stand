@@ -1377,7 +1377,7 @@ const FinancialSummary = {
     bindEvents: function() {
         const self = this;
         
-        // Real-time calculation on extras, expenses, and market card cash input
+        // Real-time calculation on extras, expenses, and market card cash left input
         $(document).off('input.finsummary change.finsummary keyup.finsummary', '#extrasAmount, #expensesAmount, #marketCardCash');
         $(document).on('input.finsummary change.finsummary keyup.finsummary', '#extrasAmount, #expensesAmount, #marketCardCash', function() {
             self.calculateCashLeft();

@@ -120,7 +120,7 @@ $current_page = get_query_var('stand120_page');
                 <iconify-icon icon="solar:wallet-linear"></iconify-icon> Financial Summary
             </a>
             <a href="<?php echo home_url('/120-stand/expense-record/'); ?>" class="mobile-nav-link <?php echo $current_page === 'expense-record' ? 'active' : ''; ?>">
-                <iconify-icon icon="solar:document-text-linear"></iconify-icon> Market Expense
+                <iconify-icon icon="solar:document-text-linear"></iconify-icon> Card Expense
             </a>
             <a href="<?php echo home_url('/120-stand/profile/'); ?>" class="mobile-nav-link <?php echo $current_page === 'profile' ? 'active' : ''; ?>">
                 <iconify-icon icon="solar:user-linear"></iconify-icon> Profile

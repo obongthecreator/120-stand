@@ -116,13 +116,13 @@ include STAND120_PLUGIN_DIR . 'templates/partials/header.php';
         </span>
     </a>
     
-    <!-- Market Expense -->
+    <!-- Card Expense -->
     <a href="<?php echo home_url('/120-stand/expense-record/'); ?>" class="home-card">
         <div class="home-card-icon">
             <iconify-icon icon="solar:document-text-linear"></iconify-icon>
         </div>
-        <h3>Market Expense</h3>
-        <p>Record daily market expenses with description, amount, and quantity. View expense history and totals.</p>
+        <h3>Card Expense</h3>
+        <p>Record daily card expenses with description, amount, and quantity. View expense history and totals.</p>
         <span class="home-card-btn">
             <iconify-icon icon="solar:arrow-right-linear"></iconify-icon> Open
         </span>
